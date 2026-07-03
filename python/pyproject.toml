@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "piano-fit"
+version = "0.1.0"
+description = "Python orchestration tools for Piano fitting"
+authors = ["Piano contributors"]
+readme = "../tools/vintage_upright/README.md"
+packages = [{ include = "piano_fit" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+numpy = "*"
+tqdm = "*"
+pyyaml = "*"
+
+[tool.poetry.group.train.dependencies]
+torch = "*"
+evotorch = "*"
+
+[tool.poetry.group.wandb.dependencies]
+wandb = "*"
+
+[tool.poetry.group.dev.dependencies]
+
+[tool.poetry.scripts]
+piano-fit = "piano_fit.cli:main"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

@@ -8,7 +8,6 @@ from unittest import mock
 import json
 import wave
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "python"))
 from piano_fit import prepare as prep
 
 

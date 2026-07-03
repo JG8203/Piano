@@ -5,10 +5,13 @@ The C++ optimizer target lives in `tools/piano_fit`.
 
 ## Prepare The Dataset
 
-Install the small Python helper dependency first:
+Install the Python package and training integrations:
 
 ```bash
-python3 -m pip install tqdm
+cd python
+poetry install --with train,wandb
+poetry run piano-fit prepare --help
+poetry run piano-fit train-evotorch --help
 ```
 
 Initialize the pinned NCW decoder fork before converting samples:
@@ -26,7 +29,8 @@ data/vintage-upright/manifest.jsonl
 To rebuild the committed WAVs and manifest from the imported raw samples:
 
 ```bash
-tools/vintage_upright/prepare_vintage_upright.py \
+cd python
+poetry run piano-fit prepare \
   data/vintage-upright \
   --raw-dir data/vintage-upright/raw \
   --output data/vintage-upright \
@@ -50,7 +54,8 @@ files instead of converting from `.ncw` during each run.
 For a quick decoder check:
 
 ```bash
-tools/vintage_upright/prepare_vintage_upright.py \
+cd python
+poetry run piano-fit prepare \
   "/Users/armaine/Downloads/Vintage Upright" \
   --output /tmp/vintage-upright-check \
   --only A3_F C4_F C4_M C4_P
@@ -78,16 +83,11 @@ cmake --build build-fit --target PianoFit --config Release -j 2
 
 ## Run Pilot Optimization With EvoTorch
 
-Install the optimizer dependency:
+Let EvoTorch drive CMA-ES while `PianoFit` evaluates each population:
 
 ```bash
-python3 -m pip install evotorch tqdm
-```
-
-Then let EvoTorch drive CMA-ES while `PianoFit` evaluates each population:
-
-```bash
-tools/piano_fit/run_with_evotorch.py \
+cd python
+poetry run piano-fit train-evotorch \
   --piano-fit ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
   --manifest data/vintage-upright/manifest.jsonl \
   --subset pilot \
@@ -106,17 +106,15 @@ directly with `--max-evals`, which is useful as a smaller dependency fallback.
 
 ## Run With Weights & Biases
 
-Install W&B in your Python environment first:
+Log in to W&B, then wrap the normal fitter command:
 
 ```bash
-python3 -m pip install wandb
 wandb login
 ```
 
-Then wrap the normal fitter command:
-
 ```bash
-tools/piano_fit/run_with_wandb.py \
+cd python
+poetry run piano-fit wandb \
   --wandb-project piano-fit \
   --wandb-run-name vintage-upright-pilot \
   -- \
@@ -135,3 +133,13 @@ The wrapper automatically adds `--metrics` if it is missing, logs evaluation
 loss, best loss, generation sigma, final improvement, and saves the result JSON
 plus exported WAVs as run artifacts. Use `--wandb-mode offline` for offline
 logging.
+
+## Compatibility Wrappers
+
+The legacy entry points remain as thin wrappers for saved commands:
+
+```bash
+tools/vintage_upright/prepare_vintage_upright.py --help
+tools/piano_fit/run_with_evotorch.py --help
+tools/piano_fit/run_with_wandb.py --help
+```
