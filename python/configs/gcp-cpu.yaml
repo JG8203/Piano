@@ -1,0 +1,27 @@
+dataset:
+  manifest: ../../data/vintage-upright/manifest.jsonl
+
+build:
+  piano_fit: ../../build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit
+
+train:
+  subset: all
+  population: 64
+  sigma: 0.15
+  max_evals: 10000
+  max_seconds: 6
+  seed: 12345
+  device: cpu
+  work_dir: ../../build/vintage-upright/gcp-cpu-work
+
+outputs:
+  metrics: ../../build/vintage-upright/gcp-cpu-metrics.jsonl
+  result: ../../build/vintage-upright/gcp-cpu-fit.json
+  export_dir: ../../build/vintage-upright/gcp-cpu-audio
+
+wandb:
+  enabled: false
+  project: piano-fit
+  entity: null
+  run_name: gcp-cpu
+  mode: null

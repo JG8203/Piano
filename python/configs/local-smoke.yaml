@@ -1,0 +1,27 @@
+dataset:
+  manifest: ../../data/vintage-upright/manifest.jsonl
+
+build:
+  piano_fit: ../../build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit
+
+train:
+  subset: pilot
+  population: 8
+  sigma: 0.15
+  max_evals: 32
+  max_seconds: 1
+  seed: 12345
+  device: cpu
+  work_dir: ../../build/vintage-upright/local-smoke-work
+
+outputs:
+  metrics: ../../build/vintage-upright/local-smoke-metrics.jsonl
+  result: ../../build/vintage-upright/local-smoke-fit.json
+  export_dir: ../../build/vintage-upright/local-smoke-audio
+
+wandb:
+  enabled: false
+  project: piano-fit
+  entity: null
+  run_name: local-smoke
+  mode: null

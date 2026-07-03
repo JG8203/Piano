@@ -83,6 +83,14 @@ def log_metric(wandb_run, metric: dict[str, object]) -> None:
     wandb_run.log(payload, step=int(step) if isinstance(step, int) else None)
 
 
+class WandbMetrics:
+    def __init__(self, wandb_run) -> None:
+        self.wandb_run = wandb_run
+
+    def log(self, record: dict[str, object]) -> None:
+        log_metric(self.wandb_run, record)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:

@@ -99,6 +99,15 @@ class JsonlMetrics:
             out.write(json.dumps(record, separators=(",", ":")) + "\n")
 
 
+class TeeMetrics:
+    def __init__(self, *metrics: Any) -> None:
+        self.metrics = metrics
+
+    def log(self, record: dict[str, Any]) -> None:
+        for metrics in self.metrics:
+            metrics.log(record)
+
+
 def make_cmaes(problem: Any, population: int, sigma: float, genome_size: int) -> Any:
     from evotorch.algorithms import CMAES
 
@@ -118,8 +127,7 @@ def make_cmaes(problem: Any, population: int, sigma: float, genome_size: int) ->
     raise RuntimeError(f"Could not construct EvoTorch CMAES: {last_error}")
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def run_training(args: argparse.Namespace, metrics: Any | None = None) -> int:
     if args.population < 4:
         raise SystemExit("--population must be at least 4")
     if args.max_evals < 1:
@@ -128,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     genome_size = get_genome_size(args.piano_fit)
     work_dir = args.work_dir or Path(tempfile.mkdtemp(prefix="piano-fit-evotorch-"))
     work_dir.mkdir(parents=True, exist_ok=True)
-    metrics = JsonlMetrics(args.metrics)
+    metrics = metrics or JsonlMetrics(args.metrics)
 
     best_loss = math.inf
     best_genome = [0.5] * genome_size
@@ -240,6 +248,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Best loss: {best_loss}")
     print(f"Result: {args.output}")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run_training(parse_args(argv))
 
 
 if __name__ == "__main__":

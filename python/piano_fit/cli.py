@@ -9,7 +9,7 @@ from collections.abc import Sequence
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="piano-fit", description=__doc__)
-    parser.add_argument("command", nargs="?", choices=("prepare", "train-evotorch", "wandb"))
+    parser.add_argument("command", nargs="?", choices=("prepare", "train", "train-evotorch", "wandb"))
     return parser
 
 
@@ -31,6 +31,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from piano_fit import prepare
 
         return prepare.main(rest)
+    if command == "train":
+        from piano_fit import train
+
+        return train.main(rest)
     if command == "train-evotorch":
         from piano_fit import train_evotorch
 

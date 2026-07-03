@@ -1,0 +1,27 @@
+dataset:
+  manifest: ../../data/vintage-upright/manifest.jsonl
+
+build:
+  piano_fit: ../../build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit
+
+train:
+  subset: pilot
+  population: 40
+  sigma: 0.15
+  max_evals: 1000
+  max_seconds: 3
+  seed: 12345
+  device: cpu
+  work_dir: ../../build/vintage-upright/local-pilot-work
+
+outputs:
+  metrics: ../../build/vintage-upright/local-pilot-metrics.jsonl
+  result: ../../build/vintage-upright/local-pilot-fit.json
+  export_dir: ../../build/vintage-upright/local-pilot-audio
+
+wandb:
+  enabled: false
+  project: piano-fit
+  entity: null
+  run_name: local-pilot
+  mode: null
