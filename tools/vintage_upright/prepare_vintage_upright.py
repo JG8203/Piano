@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
 import json
 import math
 import os
@@ -141,14 +142,21 @@ def convert_sample(converter: Path, ncw_path: Path, wav_path: Path, overwrite: b
     run([str(converter), str(ncw_path), str(wav_path)])
 
 
+def manifest_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def convert_and_describe_sample(converter: Path, wav_root: Path, overwrite: bool, ncw_path: Path) -> dict[str, object]:
     midi_note, layer, velocity = parse_sample_name(ncw_path)
     wav_path = wav_root / f"{ncw_path.stem}.wav"
     convert_sample(converter, ncw_path, wav_path, overwrite)
     stats = wav_stats(wav_path)
     return {
-        "source_path": str(ncw_path),
-        "path": str(wav_path),
+        "source_path": manifest_path(ncw_path),
+        "path": manifest_path(wav_path),
         "midi_note": midi_note,
         "layer": layer,
         "target_velocity": velocity,
@@ -227,6 +235,23 @@ def write_manifest(records: list[dict[str, object]], manifest_path: Path) -> Non
             out.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_checksums(paths: Iterable[Path], checksum_path: Path) -> None:
+    checksum_path.parent.mkdir(parents=True, exist_ok=True)
+    files = {manifest_path(path): sha256_file(path) for path in sorted(paths, key=manifest_path)}
+    checksum_path.write_text(
+        json.dumps({"algorithm": "sha256", "files": files}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
 def validate_coverage(records: list[dict[str, object]]) -> None:
     by_note: dict[int, set[str]] = {}
     for record in records:
@@ -249,7 +274,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("library_root", type=Path, help="Path to the Vintage Upright library root")
     parser.add_argument("--output", type=Path, default=Path("build/vintage-upright"), help="Prepared dataset output directory")
+    parser.add_argument("--raw-dir", type=Path, default=None, help="Directory containing Vintage Upright .ncw files")
+    parser.add_argument("--wav-dir", type=Path, default=None, help="Directory for converted WAV files")
     parser.add_argument("--manifest", type=Path, default=None, help="Manifest JSONL path")
+    parser.add_argument("--checksums", type=Path, default=None, help="Checksum JSON path")
     parser.add_argument("--ncw-convert", type=Path, default=None, help="Optional prebuilt ncw-convert path")
     parser.add_argument("--overwrite", action="store_true", help="Reconvert existing WAV files")
     parser.add_argument("--only", nargs="*", default=None, help="Optional sample stems to convert, e.g. A3_F C4_F")
@@ -257,14 +285,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-progress", action="store_true", help="Disable conversion progress display")
     args = parser.parse_args(argv)
 
-    sample_dir = args.library_root / "Vintage Upright Samples"
+    sample_dir = args.raw_dir if args.raw_dir else args.library_root / "Vintage Upright Samples"
     if not sample_dir.is_dir():
         print(f"Sample directory not found: {sample_dir}", file=sys.stderr)
         return 2
 
     output = args.output.resolve()
-    wav_root = output / "wav"
+    wav_root = args.wav_dir.resolve() if args.wav_dir else output / "wav"
     manifest_path = args.manifest or (output / "manifest.jsonl")
+    checksum_path = args.checksums or (output / "checksums.json")
     converter = args.ncw_convert.resolve() if args.ncw_convert else build_ncw_converter()
 
     records: list[dict[str, object]] = []
@@ -293,8 +322,11 @@ def main(argv: list[str] | None = None) -> int:
                 records.append(future.result())
 
     write_manifest(records, manifest_path)
+    wav_paths = [wav_root / f"{ncw_path.stem}.wav" for ncw_path in sample_paths]
+    write_checksums([*sample_paths, *wav_paths, manifest_path], checksum_path)
     validate_coverage(records)
     print(f"Manifest: {manifest_path}")
+    print(f"Checksums: {checksum_path}")
     return 0
 
 

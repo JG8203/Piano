@@ -17,15 +17,26 @@ Initialize the pinned NCW decoder fork before converting samples:
 git submodule update --init --recursive third_party/ncw
 ```
 
-```bash
-tools/vintage_upright/prepare_vintage_upright.py \
-  "/Users/armaine/Downloads/Vintage Upright" \
-  --output build/vintage-upright \
-  --jobs 8
+Normal training should use the committed prepared dataset:
+
+```text
+data/vintage-upright/manifest.jsonl
 ```
 
-The script converts Kontakt `.ncw` files to WAV, writes
-`build/vintage-upright/manifest.jsonl`, and records note, velocity layer, audio
+To rebuild the committed WAVs and manifest from the imported raw samples:
+
+```bash
+tools/vintage_upright/prepare_vintage_upright.py \
+  data/vintage-upright \
+  --raw-dir data/vintage-upright/raw \
+  --output data/vintage-upright \
+  --wav-dir data/vintage-upright/wav \
+  --manifest data/vintage-upright/manifest.jsonl \
+  --jobs 8 \
+  --overwrite
+```
+
+The script converts Kontakt `.ncw` files to WAV, writes a manifest, and records note, velocity layer, audio
 metadata, peak, and RMS statistics. It builds `ncw-convert` from the pinned
 `third_party/ncw` submodule, sourced from the `JG8203/ncw` fork with the Vintage
 Upright decoder fixes committed there. Conversion progress is shown with `tqdm`;
@@ -56,7 +67,7 @@ cmake --build build-fit --target PianoFit --config Release -j 2
 
 ```bash
 ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
-  --manifest build/vintage-upright/manifest.jsonl \
+  --manifest data/vintage-upright/manifest.jsonl \
   --subset pilot \
   --max-evals 0 \
   --max-seconds 1 \
@@ -78,7 +89,7 @@ Then let EvoTorch drive CMA-ES while `PianoFit` evaluates each population:
 ```bash
 tools/piano_fit/run_with_evotorch.py \
   --piano-fit ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
-  --manifest build/vintage-upright/manifest.jsonl \
+  --manifest data/vintage-upright/manifest.jsonl \
   --subset pilot \
   --population 40 \
   --sigma 0.15 \
@@ -110,7 +121,7 @@ tools/piano_fit/run_with_wandb.py \
   --wandb-run-name vintage-upright-pilot \
   -- \
   ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
-  --manifest build/vintage-upright/manifest.jsonl \
+  --manifest data/vintage-upright/manifest.jsonl \
   --subset pilot \
   --population 40 \
   --sigma 0.15 \
