@@ -14,3 +14,7 @@
 	path = modules/clap-juce-extensions
 	url = https://github.com/free-audio/clap-juce-extensions.git
 	branch = main
+[submodule "third_party/ncw"]
+	path = third_party/ncw
+	url = https://github.com/JG8203/ncw.git
+	branch = piano-fit-decoder

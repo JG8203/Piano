@@ -1,0 +1,126 @@
+# Vintage Upright Fitting Pipeline
+
+This folder contains the dataset preparation side of the offline fitting flow.
+The C++ optimizer target lives in `tools/piano_fit`.
+
+## Prepare The Dataset
+
+Install the small Python helper dependency first:
+
+```bash
+python3 -m pip install tqdm
+```
+
+Initialize the pinned NCW decoder fork before converting samples:
+
+```bash
+git submodule update --init --recursive third_party/ncw
+```
+
+```bash
+tools/vintage_upright/prepare_vintage_upright.py \
+  "/Users/armaine/Downloads/Vintage Upright" \
+  --output build/vintage-upright \
+  --jobs 8
+```
+
+The script converts Kontakt `.ncw` files to WAV, writes
+`build/vintage-upright/manifest.jsonl`, and records note, velocity layer, audio
+metadata, peak, and RMS statistics. It builds `ncw-convert` from the pinned
+`third_party/ncw` submodule, sourced from the `JG8203/ncw` fork with the Vintage
+Upright decoder fixes committed there. Conversion progress is shown with `tqdm`;
+pass `--no-progress` for quiet logs. Use `--jobs 1` for serial conversion if you
+are debugging decoder behavior, or raise/lower `--jobs` to match your machine
+and disk speed.
+
+Once Plan 002 lands, normal training runs should use the committed/prepared WAV
+files instead of converting from `.ncw` during each run.
+
+For a quick decoder check:
+
+```bash
+tools/vintage_upright/prepare_vintage_upright.py \
+  "/Users/armaine/Downloads/Vintage Upright" \
+  --output /tmp/vintage-upright-check \
+  --only A3_F C4_F C4_M C4_P
+```
+
+## Build The Fitter
+
+```bash
+cmake -B build-fit -DCMAKE_BUILD_TYPE=Release -DBUILD_FIT_TOOLS=ON
+cmake --build build-fit --target PianoFit --config Release -j 2
+```
+
+## Run A Smoke Pass
+
+```bash
+./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
+  --manifest build/vintage-upright/manifest.jsonl \
+  --subset pilot \
+  --max-evals 0 \
+  --max-seconds 1 \
+  --metrics build/vintage-upright/smoke-metrics.jsonl \
+  --output build/vintage-upright/smoke.json \
+  --export-dir build/vintage-upright/smoke-audio
+```
+
+## Run Pilot Optimization With EvoTorch
+
+Install the optimizer dependency:
+
+```bash
+python3 -m pip install evotorch tqdm
+```
+
+Then let EvoTorch drive CMA-ES while `PianoFit` evaluates each population:
+
+```bash
+tools/piano_fit/run_with_evotorch.py \
+  --piano-fit ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
+  --manifest build/vintage-upright/manifest.jsonl \
+  --subset pilot \
+  --population 40 \
+  --sigma 0.15 \
+  --max-evals 10000 \
+  --max-seconds 6 \
+  --metrics build/vintage-upright/pilot-metrics.jsonl \
+  --output build/vintage-upright/pilot-fit.json \
+  --export-dir build/vintage-upright/pilot-audio
+```
+
+Use `--subset all` after the pilot loss is moving in the right direction.
+The original built-in C++ CMA-ES path is still available by running `PianoFit`
+directly with `--max-evals`, which is useful as a smaller dependency fallback.
+
+## Run With Weights & Biases
+
+Install W&B in your Python environment first:
+
+```bash
+python3 -m pip install wandb
+wandb login
+```
+
+Then wrap the normal fitter command:
+
+```bash
+tools/piano_fit/run_with_wandb.py \
+  --wandb-project piano-fit \
+  --wandb-run-name vintage-upright-pilot \
+  -- \
+  ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
+  --manifest build/vintage-upright/manifest.jsonl \
+  --subset pilot \
+  --population 40 \
+  --sigma 0.15 \
+  --max-evals 10000 \
+  --max-seconds 6 \
+  --output build/vintage-upright/pilot-fit.json \
+  --export-dir build/vintage-upright/pilot-audio
+```
+
+The wrapper automatically adds `--metrics` if it is missing, logs evaluation
+loss, best loss, generation sigma, final improvement, and saves the result JSON
+plus exported WAVs as run artifacts. Use `--wandb-mode offline` for offline
+logging.
