@@ -1,37 +1,34 @@
 # Vintage Upright Dataset
 
-This directory stores the Vintage Upright sample data used by the Piano fitting
-pipeline.
+This directory stores the Vintage Upright metadata and sample placeholders used
+by the Piano fitting pipeline.
 
 ## Source
 
-The raw `.ncw` files were imported from the local Vintage Upright library at:
-
-```text
-/Users/armaine/Downloads/Vintage Upright/Vintage Upright Samples
-```
-
-Converted `.wav` files are generated from those raw samples with the pinned
-`third_party/ncw` converter.
+Raw `.ncw` files come from an approved Vintage Upright sample source. Converted
+`.wav` files are generated from those raw samples with the pinned
+`third_party/ncw` converter. Keep the raw and converted files at the same
+relative paths shown in `manifest.jsonl`.
 
 ## Permission And Redistribution
 
-The operator confirmed they received verbal permission to store the Vintage
-Upright audio files in this repository through Git LFS. The raw `.ncw` files
-and converted `.wav` files are intended for this project's Git LFS storage.
-Repository visibility and LFS remote privacy should remain consistent with that
-permission before pushing or sharing this data.
+The operator confirmed they received verbal permission to use the Vintage
+Upright audio files for this project. Do not publish or upload hydrated audio
+payloads unless repository visibility and distribution remain consistent with
+that permission.
 
-## Git LFS
+## Audio Payloads
 
-The committed audio payloads are stored through Git LFS:
+The public fork keeps clone-safe placeholder files at:
 
 ```text
 data/vintage-upright/raw/**/*.ncw
 data/vintage-upright/wav/**/*.wav
 ```
 
-Run `git lfs pull` after checkout if the audio files are still pointers.
+Hydrate those paths from an approved dataset source before running full fitting
+jobs. Plugin builds, Python tests, and fitting dry-runs do not require hydrated
+audio payloads.
 
 ## Verify Checksums
 

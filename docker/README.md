@@ -58,16 +58,16 @@ changes that.
 ## Dataset Behavior
 
 The Docker build preserves the repo-visible `data/vintage-upright` layout,
-including Git LFS pointer files. It does not run `git lfs pull` during image
-build because local checkouts and CI jobs may not have remote LFS credentials.
+including placeholder audio files. It does not hydrate private dataset bytes
+during image build because local checkouts and CI jobs may not have access to
+the full dataset.
 
 Before a full training run, either:
 
-- run `git lfs pull` in a checkout that has access to the dataset and build the
+- hydrate `data/vintage-upright` from an approved dataset source and build the
   image from that checkout;
-- run `git lfs pull` on the VM before starting the container and mount the
-  hydrated `data/vintage-upright` tree into the same relative path used by the
-  configs;
+- hydrate `data/vintage-upright` on the VM before starting the container and
+  mount that tree into the same relative path used by the configs;
 - mount an operator-managed dataset path, such as a GCS bucket mounted with
   Cloud Storage FUSE, and override `--manifest` to point at that mounted path.
 

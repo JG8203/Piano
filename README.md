@@ -27,7 +27,7 @@ tests/                   C++ unit and audio integration tests
 python/                  piano-fit Python package and config profiles
 tools/piano_fit/         C++ PianoFit fitting evaluator
 tools/vintage_upright/   Vintage Upright dataset/fitting workflow docs
-data/vintage-upright/    Prepared dataset metadata and Git LFS sample pointers
+data/vintage-upright/    Prepared dataset metadata and sample placeholders
 docker/                  GCP-ready fitting container docs and Dockerfile
 modules/                 JUCE and other submodules
 third_party/ncw/         Pinned NCW decoder fork used by dataset preparation
@@ -48,17 +48,10 @@ If you already cloned without submodules:
 git submodule update --init --recursive
 ```
 
-The prepared Vintage Upright dataset uses Git LFS pointers. Install Git LFS and
-pull the sample bytes only when you need to run the fitting pipeline:
-
-```bash
-git lfs install
-git lfs pull
-```
-
-If you do not have access to the LFS objects, plugin builds and Python dry-run
-configuration checks still work; full fitting runs need hydrated sample files or
-an externally mounted dataset.
+The prepared Vintage Upright metadata is included in the repo. Audio payloads
+are represented by small placeholder files so cloning the fork does not require
+private sample storage access. Full fitting runs need hydrated sample files from an
+approved dataset source or an externally mounted dataset path.
 
 ## Requirements
 
@@ -88,7 +81,7 @@ sudo apt-get install -y \
 - Python 3.11 or 3.12
 - Poetry
 - Rust/Cargo for rebuilding the NCW conversion helper
-- Git LFS for full dataset hydration
+- Hydrated Vintage Upright samples for full fitting runs
 - Docker if you want to use the containerized GCP workflow
 
 ## Build The Plugin
@@ -240,14 +233,15 @@ Current workflows cover:
   metadata, and config dry-runs.
 
 The fitting smoke workflow intentionally avoids expensive optimization runs and
-does not require private Git LFS dataset bytes.
+does not require private dataset bytes.
 
 ## Troubleshooting
 
 - **Submodule headers or JUCE files are missing**: run
   `git submodule update --init --recursive`.
-- **Fitting fails to read audio files**: run `git lfs pull`, or mount a hydrated
-  `data/vintage-upright` directory and override the manifest path.
+- **Fitting fails to read audio files**: hydrate `data/vintage-upright` from an
+  approved dataset source, or mount a hydrated dataset directory and override the
+  manifest path.
 - **Docker build cannot connect to daemon**: start Docker Desktop or your Docker
   service, then retry the `docker build` command.
 - **Poetry selects a different Python**: the package supports Python
