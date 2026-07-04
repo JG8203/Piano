@@ -1,6 +1,6 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1777838689022,
-  "repoUrl": "https://github.com/FigBug/Piano",
+  "lastUpdate": 1783131052395,
+  "repoUrl": "https://github.com/JG8203/Piano",
   "entries": {
     "Piano Performance (Windows)": [
       {
@@ -4007,6 +4007,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "16 voices",
             "value": 22.4761,
+            "unit": "x realtime"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "joshua_gilo@dlsu.edu.ph",
+            "name": "Joshua Armaine Gilo",
+            "username": "JG8203"
+          },
+          "committer": {
+            "email": "joshua_gilo@dlsu.edu.ph",
+            "name": "Joshua Armaine Gilo",
+            "username": "JG8203"
+          },
+          "distinct": true,
+          "id": "cfc0a78164b9ae8e1e24d09ed26dc04e66f2cd65",
+          "message": "Expand setup documentation for forked repo",
+          "timestamp": "2026-07-04T10:06:49+08:00",
+          "tree_id": "5f4be6daac6e7b39e87d117f5307449e4240db35",
+          "url": "https://github.com/JG8203/Piano/commit/cfc0a78164b9ae8e1e24d09ed26dc04e66f2cd65"
+        },
+        "date": 1783131051266,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "1 voice",
+            "value": 233.0666,
+            "unit": "x realtime"
+          },
+          {
+            "name": "4 voices",
+            "value": 100.1385,
+            "unit": "x realtime"
+          },
+          {
+            "name": "8 voices",
+            "value": 70.7066,
+            "unit": "x realtime"
+          },
+          {
+            "name": "16 voices",
+            "value": 46.1421,
             "unit": "x realtime"
           }
         ]
