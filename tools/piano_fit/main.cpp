@@ -13,6 +13,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <random>
@@ -24,9 +25,12 @@
 #include <vector>
 
 #include <pagmo/algorithm.hpp>
-#include <pagmo/algorithms/pso.hpp>
+#include <pagmo/algorithms/pso_gen.hpp>
+#include <pagmo/batch_evaluators/thread_bfe.hpp>
+#include <pagmo/bfe.hpp>
 #include <pagmo/population.hpp>
 #include <pagmo/problem.hpp>
+#include <pagmo/threading.hpp>
 #include <pagmo/types.hpp>
 
 extern Param params[NumParams];
@@ -37,6 +41,9 @@ constexpr int kSampleRate = 48000;
 constexpr int kBlockSize = 512;
 constexpr double kPi = 3.1415926535897932384626433832795;
 constexpr float kEpsilon = 1.0e-7f;
+constexpr float kInvalidGenomeLoss = 1.0e9f;
+constexpr float kFitParameterMin = 0.2f;
+constexpr float kFitParameterMax = 0.8f;
 
 struct Options
 {
@@ -57,11 +64,13 @@ struct Options
     unsigned psoVariant = 5;
     unsigned neighbourhoodType = 2;
     unsigned neighbourhoodParam = 4;
+    unsigned psoVerbosity = 1;
     float maxSeconds = 6.0f;
     uint32_t seed = 12345;
     bool printModelInfo = false;
     bool serveJsonl = false;
     bool psoMemory = false;
+    bool parallelEvaluations = true;
 };
 
 struct ManifestRecord
@@ -188,7 +197,9 @@ void printUsage(std::ostream& out = std::cout)
         << "  --pso-variant <n>      pagmo PSO variant 1..6 (default 5)\n"
         << "  --neighb-type <n>      pagmo PSO topology 1..4 (default 2)\n"
         << "  --neighb-param <n>     pagmo PSO neighbourhood parameter (default 4)\n"
+        << "  --pso-verbosity <n>    pagmo log/screen interval in generations (default 1, 0 disables)\n"
         << "  --pso-memory           Keep pagmo PSO memory across evolve calls\n"
+        << "  --serial-evals         Disable pagmo thread_bfe parallel batch fitness evaluation\n"
         << "  --sigma <x>            Deprecated; use --max-vel for PSO velocity bounds\n"
         << "  --max-seconds <x>      Target/render crop duration (default 6)\n"
         << "  --export-dir <dir>     Optional target/render WAV export directory\n"
@@ -242,6 +253,8 @@ Options parseOptions(int argc, char** argv)
             options.neighbourhoodType = static_cast<unsigned>(std::stoul(requireValue("--neighb-type")));
         else if (arg == "--neighb-param")
             options.neighbourhoodParam = static_cast<unsigned>(std::stoul(requireValue("--neighb-param")));
+        else if (arg == "--pso-verbosity")
+            options.psoVerbosity = static_cast<unsigned>(std::stoul(requireValue("--pso-verbosity")));
         else if (arg == "--max-seconds")
             options.maxSeconds = std::stof(requireValue("--max-seconds"));
         else if (arg == "--export-dir")
@@ -254,6 +267,8 @@ Options parseOptions(int argc, char** argv)
             options.serveJsonl = true;
         else if (arg == "--pso-memory")
             options.psoMemory = true;
+        else if (arg == "--serial-evals")
+            options.parallelEvaluations = false;
         else if (arg == "--help" || arg == "-h")
         {
             printUsage();
@@ -688,7 +703,7 @@ struct FitModel
         }
 
         for (float& value : values)
-            value = std::clamp(value, 0.0f, 1.0f);
+            value = std::clamp(value, kFitParameterMin, kFitParameterMax);
         values[pDwgs4] = 1.0f;
         values[pDownsample] = 0.0f;
         values[pLongModes] = 0.0f;
@@ -699,6 +714,134 @@ struct FitModel
 int midiVelocityForLayer(float targetVelocity)
 {
     return std::clamp(static_cast<int>(std::lround(std::sqrt(std::clamp(targetVelocity, 0.0f, 1.0f)) * 127.0f)), 1, 127);
+}
+
+float midiFrequency(int midiNote)
+{
+    return 440.0f * std::pow(2.0f, (static_cast<float>(midiNote) - 69.0f) / 12.0f);
+}
+
+float physicalParameterValue(int index, float value)
+{
+    switch (index)
+    {
+        case pYoungsModulus: return 200.0f * std::exp(4.0f * (value - 0.5f));
+        case pStringDensity: return 7850.0f * std::exp(4.0f * (value - 0.5f));
+        case pHammerMass: return std::exp(4.0f * (value - 0.5f));
+        case pStringTension: return 800.0f * std::exp(3.0f * (value - 0.5f));
+        case pStringLength: return std::exp(2.0f * (value - 0.25f));
+        case pStringRadius: return std::exp(2.0f * (value - 0.25f));
+        case pHammerCompliance: return 2.0f * value;
+        case pHammerSpringConstant: return 2.0f * value;
+        case pHammerHysteresis: return std::exp(4.0f * (value - 0.5f));
+        case pBridgeImpedance: return 8000.0f * std::exp(12.0f * (value - 0.5f));
+        case pBridgeHorizontalImpedance: return 60000.0f * std::exp(12.0f * (value - 0.5f));
+        case pVerticalHorizontalImpedance: return 400.0f * std::exp(12.0f * (value - 0.5f));
+        case pHammerPosition: return 0.05f + value * 0.15f;
+        case pSoundboardSize: return value;
+        case pStringDecay: return 0.25f * std::exp(6.0f * (value - 0.25f));
+        case pStringLopass: return 5.85f * std::exp(6.0f * (value - 0.5f));
+        case pDampedStringDecay: return 8.0f * std::exp(6.0f * (value - 0.5f));
+        case pDampedStringLopass: return 25.0f * std::exp(6.0f * (value - 0.5f));
+        case pSoundboardDecay: return 20.0f * std::exp(4.0f * (value - 0.5f));
+        case pSoundboardLopass: return 20.0f * std::exp(4.0f * (value - 0.5f));
+        case pLongitudinalGamma: return 1.0e-2f * std::exp(10.0f * (value - 0.5f));
+        case pLongitudinalGammaQuadratic: return 1.0e-2f * std::exp(8.0f * (value - 0.5f));
+        case pLongitudinalGammaDamped: return 5.0e-2f * std::exp(10.0f * (value - 0.5f));
+        case pLongitudinalGammaQuadraticDamped: return 3.0e-2f * std::exp(8.0f * (value - 0.5f));
+        case pLongitudinalMix: return value == 0.0f ? 0.0f : std::exp(16.0f * (value - 0.5f));
+        case pLongitudinalTransverseMix: return value == 0.0f ? 0.0f : std::exp(16.0f * (value - 0.5f));
+        case pVolume: return 5.0e-3f * std::exp(8.0f * (value - 0.5f));
+        case pMaxVelocity: return 10.0f * std::exp(8.0f * (value - 0.5f));
+        case pStringDetuning: return std::exp(10.0f * (value - 0.5f));
+        case pBridgeMass: return 10.0f * std::exp(10.0f * (value - 0.5f));
+        case pBridgeSpring: return 1.0e5f * std::exp(20.0f * (value - 0.5f));
+        case pDwgs4: return std::lrint(value);
+        case pDownsample: return 1.0f + std::lrint(value);
+        case pLongModes: return 1.0f + std::lrint(value);
+        default: return value;
+    }
+}
+
+bool isGenomeStableForTarget(const FitModel& model, const std::vector<float>& genome, const ManifestRecord& record)
+{
+    std::array<float, NumParams> normalized = model.parametersFor(genome, record.midiNote, record.targetVelocity);
+    std::array<float, NumParams> v {};
+    for (int i = 0; i < NumParams; ++i)
+        v[static_cast<size_t>(i)] = physicalParameterValue(i, normalized[static_cast<size_t>(i)]);
+
+    const float f0 = 27.5f;
+    const float f = midiFrequency(record.midiNote);
+    const float logFrequency = std::log(f / f0);
+    float length = 0.04f + 2.0f / (1.0f + std::exp(-3.2f + 1.4f * logFrequency));
+    length *= v[static_cast<size_t>(pStringLength)];
+
+    const float radiusBase = 0.008f * std::pow(3.0f + 1.5f * logFrequency, -1.4f);
+    const float radius = radiusBase * v[static_cast<size_t>(pStringRadius)];
+    const float area = static_cast<float>(kPi) * radius * radius;
+    const float density = v[static_cast<size_t>(pStringDensity)];
+    const float mu = area * density;
+    const float tension = (2.0f * length * f) * (2.0f * length * f) * mu;
+    const float coreRadius = radius < 0.0006f ? radius : 0.0006f;
+    const float youngsModulus = v[static_cast<size_t>(pYoungsModulus)] * 1.0e9f;
+    const float bending = static_cast<float>(kPi * kPi * kPi) * youngsModulus * std::pow(coreRadius, 4.0f)
+        / (4.0f * length * length * tension);
+    const float longitudinalSpeed = std::sqrt(youngsModulus / density);
+    const float longitudinalFundamental = longitudinalSpeed / (2.0f * length);
+    const int forcedLongModes = 2;
+    const int nLongModes = static_cast<int>(0.5f * kSampleRate / forcedLongModes / longitudinalFundamental - 0.5f);
+    if (nLongModes >= nMaxLongModes)
+        return false;
+
+    const int downsample = 1;
+    int nstrings = 3;
+    if (record.midiNote < 31)
+        nstrings = 1;
+    else if (record.midiNote < 41)
+        nstrings = 2;
+
+    static constexpr float tune[3][3] {
+        { 1.0f, 0.0f, 0.0f },
+        { 0.9997f, 1.0003f, 0.0f },
+        { 1.0001f, 1.0003f, 0.9996f },
+    };
+
+    float hammerPosition = v[static_cast<size_t>(pHammerPosition)];
+    hammerPosition = hammerPosition / (1.0f + 0.01f * std::pow(logFrequency, 2.0f));
+
+    for (int stringIndex = 0; stringIndex < nstrings; ++stringIndex)
+    {
+        const float fk = f * (1.0f + (tune[nstrings - 1][stringIndex] - 1.0f) * v[static_cast<size_t>(pStringDetuning)]);
+        dwgs string;
+        const int upsample = string.getMinUpsample(downsample, static_cast<float>(kSampleRate), fk, hammerPosition, bending);
+        const float deltot = static_cast<float>(kSampleRate) / static_cast<float>(downsample) / fk * static_cast<float>(upsample);
+        const int del0 = static_cast<int>(0.5f * (hammerPosition * deltot));
+        int del2 = static_cast<int>(0.5f * (deltot - hammerPosition * deltot) - 1.0f);
+        if (del2 < 1)
+            return false;
+
+        const float delHalf = 0.5f * deltot;
+        const float delHammerHalf = 0.5f * hammerPosition * deltot;
+        float dTop = delHalf - delHammerHalf - static_cast<float>(del2);
+        const int dd = std::min(4, del2 - 1);
+        dTop += static_cast<float>(dd);
+        del2 -= dd;
+        const int del4 = static_cast<int>(dTop);
+        const int delTab = del0 + del2 + del4;
+        if (del0 < 0 || del2 < 0 || del4 < 0 || delTab < 0)
+            return false;
+        if (del0 >= DelaySize || del2 >= DelaySize || del4 >= DelaySize || delTab >= DelaySize)
+            return false;
+    }
+
+    return true;
+}
+
+bool isGenomeStable(const FitModel& model, const std::vector<float>& genome, const std::vector<TargetExample>& targets)
+{
+    return std::all_of(targets.begin(), targets.end(), [&](const TargetExample& target) {
+        return isGenomeStableForTarget(model, genome, target.record);
+    });
 }
 
 std::vector<float> renderPiano(const FitModel& model, const std::vector<float>& genome, const ManifestRecord& record, int sampleCount)
@@ -752,6 +895,9 @@ std::vector<float> renderPiano(const FitModel& model, const std::vector<float>& 
 
 float evaluateGenome(const FitModel& model, const std::vector<float>& genome, const std::vector<TargetExample>& targets)
 {
+    if (! isGenomeStable(model, genome, targets))
+        return kInvalidGenomeLoss;
+
     double total = 0.0;
     for (const auto& target : targets)
     {
@@ -762,7 +908,8 @@ float evaluateGenome(const FitModel& model, const std::vector<float>& genome, co
         const auto renderFeatures = extractFeatures(render, kSampleRate);
         total += featureLoss(target.features, renderFeatures);
     }
-    return static_cast<float>(total / std::max<size_t>(1, targets.size()));
+    const float loss = static_cast<float>(total / std::max<size_t>(1, targets.size()));
+    return std::isfinite(loss) ? loss : kInvalidGenomeLoss;
 }
 
 struct Candidate
@@ -1122,11 +1269,12 @@ public:
 
     void logConfig(const Options& options, int targetCount, int genomeSize)
     {
+        std::lock_guard<std::mutex> lock(mutex);
         if (! enabled)
             return;
 
         out << "{\"type\":\"config\""
-            << ",\"optimizer\":\"pagmo.pso\""
+            << ",\"optimizer\":\"pagmo.pso_gen\""
             << ",\"subset\":\"" << jsonEscape(options.subset) << "\""
             << ",\"target_count\":" << targetCount
             << ",\"genome_size\":" << genomeSize
@@ -1138,7 +1286,11 @@ public:
             << ",\"pso_variant\":" << options.psoVariant
             << ",\"neighbourhood_type\":" << options.neighbourhoodType
             << ",\"neighbourhood_param\":" << options.neighbourhoodParam
+            << ",\"pso_verbosity\":" << options.psoVerbosity
             << ",\"pso_memory\":" << (options.psoMemory ? "true" : "false")
+            << ",\"parallel_evaluations\":" << (options.parallelEvaluations ? "true" : "false")
+            << ",\"fit_parameter_min\":" << kFitParameterMin
+            << ",\"fit_parameter_max\":" << kFitParameterMax
             << ",\"max_evaluations\":" << options.maxEvaluations
             << ",\"max_seconds\":" << options.maxSeconds
             << ",\"seed\":" << options.seed
@@ -1148,6 +1300,7 @@ public:
 
     void logEvaluation(int evaluation, float loss, float bestLoss, const char* phase)
     {
+        std::lock_guard<std::mutex> lock(mutex);
         if (! enabled)
             return;
 
@@ -1168,6 +1321,7 @@ public:
                        double meanLocalBest,
                        double averageDistance)
     {
+        std::lock_guard<std::mutex> lock(mutex);
         if (! enabled)
             return;
 
@@ -1185,6 +1339,7 @@ public:
 
     void logFinal(float initialLoss, float bestLoss)
     {
+        std::lock_guard<std::mutex> lock(mutex);
         if (! enabled)
             return;
 
@@ -1200,6 +1355,7 @@ public:
 private:
     bool enabled = false;
     std::ofstream out;
+    std::mutex mutex;
 };
 
 void evaluateExternalGenomes(const Options& options,
@@ -1306,11 +1462,76 @@ pagmo::vector_double toDecisionVector(const std::vector<float>& genome)
     return values;
 }
 
+pagmo::vector_double flattenDecisionVectors(const std::vector<pagmo::vector_double>& decisionVectors)
+{
+    pagmo::vector_double flattened;
+    size_t totalSize = 0;
+    for (const auto& decisionVector : decisionVectors)
+        totalSize += decisionVector.size();
+    flattened.reserve(totalSize);
+
+    for (const auto& decisionVector : decisionVectors)
+        flattened.insert(flattened.end(), decisionVector.begin(), decisionVector.end());
+    return flattened;
+}
+
+std::vector<double> evaluateDecisionVectors(const pagmo::problem& problem,
+                                            const std::vector<pagmo::vector_double>& decisionVectors,
+                                            bool parallelEvaluations)
+{
+    std::vector<double> losses;
+    losses.reserve(decisionVectors.size());
+
+    if (decisionVectors.empty())
+        return losses;
+
+    if (parallelEvaluations && decisionVectors.size() > 1)
+    {
+        pagmo::bfe evaluator { pagmo::thread_bfe {} };
+        const auto fitnesses = evaluator(problem, flattenDecisionVectors(decisionVectors));
+        if (fitnesses.size() != decisionVectors.size())
+            throw std::runtime_error("pagmo thread_bfe returned an unexpected fitness vector size");
+        losses.insert(losses.end(), fitnesses.begin(), fitnesses.end());
+        return losses;
+    }
+
+    for (const auto& decisionVector : decisionVectors)
+    {
+        const auto fitness = problem.fitness(decisionVector);
+        if (fitness.empty())
+            throw std::runtime_error("pagmo fitness returned an empty vector");
+        losses.push_back(fitness.front());
+    }
+    return losses;
+}
+
 struct PsoEvaluationState
 {
     MetricsLogger* metrics = nullptr;
+    mutable std::mutex mutex;
     int evaluations = 0;
     float bestLoss = std::numeric_limits<float>::infinity();
+
+    void record(float loss, const char* phase)
+    {
+        int evaluation = 0;
+        float currentBest = 0.0f;
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            evaluation = ++evaluations;
+            bestLoss = std::min(bestLoss, loss);
+            currentBest = bestLoss;
+        }
+
+        if (metrics != nullptr)
+            metrics->logEvaluation(evaluation, loss, currentBest, phase);
+    }
+
+    std::pair<int, float> snapshot() const
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return { evaluations, bestLoss };
+    }
 };
 
 struct PianoFitPagmoProblem
@@ -1327,24 +1548,26 @@ struct PianoFitPagmoProblem
 
         const auto genome = toGenome(values);
         const float loss = evaluateGenome(*model, genome, *targets);
-        ++state->evaluations;
-        state->bestLoss = std::min(state->bestLoss, loss);
-        if (state->metrics != nullptr)
-            state->metrics->logEvaluation(state->evaluations, loss, state->bestLoss, "pagmo-pso");
+        state->record(loss, "pagmo-pso-batch");
         return { static_cast<double>(loss) };
     }
 
     std::pair<pagmo::vector_double, pagmo::vector_double> get_bounds() const
     {
         return {
-            pagmo::vector_double(static_cast<size_t>(genomeDimensions), 0.0),
-            pagmo::vector_double(static_cast<size_t>(genomeDimensions), 1.0),
+            pagmo::vector_double(static_cast<size_t>(genomeDimensions), static_cast<double>(kFitParameterMin)),
+            pagmo::vector_double(static_cast<size_t>(genomeDimensions), static_cast<double>(kFitParameterMax)),
         };
     }
 
     std::string get_name() const
     {
-        return "PianoFit pagmo PSO";
+        return "PianoFit pagmo generational PSO";
+    }
+
+    pagmo::thread_safety get_thread_safety() const
+    {
+        return pagmo::thread_safety::basic;
     }
 };
 
@@ -1372,16 +1595,23 @@ Candidate runPagmoPso(const Options& options,
     pagmo::problem problem { udp };
     pagmo::population population { problem, 0u, options.seed };
     population.push_back(toDecisionVector(initial), { static_cast<double>(initialLoss) });
-    while (population.size() < static_cast<pagmo::population::size_type>(options.population))
-        population.push_back(population.random_decision_vector());
 
-    const int remainingEvaluations = std::max(0, options.maxEvaluations - state->evaluations);
+    std::vector<pagmo::vector_double> randomDecisionVectors;
+    while (population.size() + randomDecisionVectors.size() < static_cast<pagmo::population::size_type>(options.population))
+        randomDecisionVectors.push_back(population.random_decision_vector());
+
+    const auto randomLosses = evaluateDecisionVectors(problem, randomDecisionVectors, options.parallelEvaluations);
+    for (size_t i = 0; i < randomDecisionVectors.size(); ++i)
+        population.push_back(randomDecisionVectors[i], { randomLosses[i] });
+
+    const int evaluationsAfterPopulation = state->snapshot().first;
+    const int remainingEvaluations = std::max(0, options.maxEvaluations - evaluationsAfterPopulation);
     const unsigned generations = static_cast<unsigned>(
         std::ceil(static_cast<double>(remainingEvaluations) / static_cast<double>(options.population)));
 
     if (generations > 0)
     {
-        pagmo::pso pso(
+        pagmo::pso_gen pso(
             generations,
             options.omega,
             options.eta1,
@@ -1392,13 +1622,15 @@ Candidate runPagmoPso(const Options& options,
             options.neighbourhoodParam,
             options.psoMemory,
             options.seed);
-        pso.set_verbosity(1u);
+        pso.set_verbosity(options.psoVerbosity);
+        if (options.parallelEvaluations)
+            pso.set_bfe(pagmo::bfe { pagmo::thread_bfe {} });
 
         pagmo::algorithm algorithm { pso };
-        const int evaluationsBeforeEvolve = state->evaluations;
+        const int evaluationsBeforeEvolve = state->snapshot().first;
         population = algorithm.evolve(population);
 
-        if (auto* evolvedPso = algorithm.extract<pagmo::pso>())
+        if (auto* evolvedPso = algorithm.extract<pagmo::pso_gen>())
         {
             for (const auto& line : evolvedPso->get_log())
             {
@@ -1416,8 +1648,9 @@ Candidate runPagmoPso(const Options& options,
         }
     }
 
-    evaluations = state->evaluations;
-    bestLoss = state->bestLoss;
+    const auto [finalEvaluations, finalBestLoss] = state->snapshot();
+    evaluations = finalEvaluations;
+    bestLoss = finalBestLoss;
 
     auto championGenome = toGenome(population.champion_x());
     const auto championFitness = population.champion_f();
@@ -1483,7 +1716,7 @@ void writeResultJson(const std::string& path,
     out << "{\n";
     out << "  \"initial_loss\": " << initialLoss << ",\n";
     out << "  \"best_loss\": " << bestLoss << ",\n";
-    out << "  \"optimizer\": \"pagmo.pso\",\n";
+    out << "  \"optimizer\": \"pagmo.pso_gen\",\n";
     out << "  \"subset\": \"" << jsonEscape(options.subset) << "\",\n";
     out << "  \"population\": " << options.population << ",\n";
     out << "  \"omega\": " << options.omega << ",\n";
@@ -1493,7 +1726,11 @@ void writeResultJson(const std::string& path,
     out << "  \"pso_variant\": " << options.psoVariant << ",\n";
     out << "  \"neighbourhood_type\": " << options.neighbourhoodType << ",\n";
     out << "  \"neighbourhood_param\": " << options.neighbourhoodParam << ",\n";
+    out << "  \"pso_verbosity\": " << options.psoVerbosity << ",\n";
     out << "  \"pso_memory\": " << (options.psoMemory ? "true" : "false") << ",\n";
+    out << "  \"parallel_evaluations\": " << (options.parallelEvaluations ? "true" : "false") << ",\n";
+    out << "  \"fit_parameter_min\": " << kFitParameterMin << ",\n";
+    out << "  \"fit_parameter_max\": " << kFitParameterMax << ",\n";
     out << "  \"max_evaluations\": " << options.maxEvaluations << ",\n";
     out << "  \"genome\": [";
     for (size_t i = 0; i < genome.size(); ++i)

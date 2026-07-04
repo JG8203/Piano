@@ -16,7 +16,7 @@ the fitting workflow uses a C++ `PianoFit` evaluator plus Python orchestration.
 - Longitudinal string modes
 - Soundboard resonance
 - Available as VST, VST3, AU (macOS), and LV2 (Linux) plugins
-- Offline fitting tools with Poetry, EvoTorch orchestration, pagmo2 PSO fallback,
+- Offline fitting tools with Poetry, EvoTorch orchestration, pagmo2 batch PSO fallback,
   W&B support, Docker, and GCP-ready CPU/GPU profiles
 
 ## Repository Layout
@@ -216,8 +216,11 @@ The config-driven command always writes a local JSONL metrics file when the
 profile specifies one, so you still have local run telemetry if W&B is disabled
 or offline.
 
-The native C++ `PianoFit` optimizer also writes JSONL metrics and can be streamed
-through the existing W&B wrapper:
+The native C++ `PianoFit` optimizer uses pagmo's generational PSO with threaded
+batch fitness evaluation by default. The search is constrained to the stable
+interior of the plugin parameter range, `[0.2, 0.8]`, and unstable candidates
+are penalized instead of terminating the run. It also writes JSONL metrics and
+can be streamed through the existing W&B wrapper:
 
 ```bash
 cd python
@@ -227,10 +230,13 @@ poetry run piano-fit wandb --cwd .. --wandb-mode offline -- \
   --subset pilot \
   --population 8 \
   --max-evals 16 \
+  --pso-verbosity 1 \
   --max-seconds 1 \
   --metrics build/vintage-upright/cpp-pso-metrics.jsonl \
   --output build/vintage-upright/cpp-pso-fit.json
 ```
+
+Use `--serial-evals` to disable pagmo `thread_bfe` parallelism when debugging.
 
 ## Docker And GCP
 
