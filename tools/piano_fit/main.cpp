@@ -42,14 +42,38 @@ constexpr int kBlockSize = 512;
 constexpr double kPi = 3.1415926535897932384626433832795;
 constexpr float kEpsilon = 1.0e-7f;
 constexpr float kInvalidGenomeLoss = 1.0e9f;
-constexpr float kFitParameterMin = 0.2f;
-constexpr float kFitParameterMax = 0.8f;
+constexpr float kUiParameterMin = 0.0f;
+constexpr float kUiParameterMax = 1.0f;
 constexpr int kPianoLayerMidiVelocity = 26;
 constexpr int kMezzoLayerMidiVelocity = 76;
 constexpr int kForteLayerMidiVelocity = 101;
 constexpr float kPianoLayerVelocity = static_cast<float>(kPianoLayerMidiVelocity) / 127.0f;
 constexpr float kMezzoLayerVelocity = static_cast<float>(kMezzoLayerMidiVelocity) / 127.0f;
 constexpr float kForteLayerVelocity = static_cast<float>(kForteLayerMidiVelocity) / 127.0f;
+
+float defaultParameterValue(int index)
+{
+    switch (index)
+    {
+        case pStringLength:
+        case pStringRadius:
+        case pStringDecay:
+            return 0.25f;
+
+        case pSoundboardSize:
+        case pLongitudinalGammaQuadratic:
+        case pLongitudinalGammaQuadraticDamped:
+        case pDownsample:
+        case pLongModes:
+            return 0.0f;
+
+        case pDwgs4:
+            return 1.0f;
+
+        default:
+            return 0.5f;
+    }
+}
 
 struct Options
 {
@@ -677,17 +701,41 @@ struct FitModel
 
     std::vector<float> initialGenome() const
     {
-        return std::vector<float>(static_cast<size_t>(genomeSize()), 0.5f);
+        std::vector<float> genome;
+        genome.reserve(static_cast<size_t>(genomeSize()));
+
+        for (int param : baseParams)
+            genome.push_back(defaultParameterValue(param));
+
+        genome.insert(genome.end(), noteCurveParams.size() * 2, 0.5f);
+        genome.insert(genome.end(), velocityCurveParams.size(), 0.5f);
+        return genome;
+    }
+
+    std::pair<pagmo::vector_double, pagmo::vector_double> genomeBounds() const
+    {
+        pagmo::vector_double lower;
+        pagmo::vector_double upper;
+        lower.reserve(static_cast<size_t>(genomeSize()));
+        upper.reserve(static_cast<size_t>(genomeSize()));
+
+        for (size_t i = 0; i < baseParams.size(); ++i)
+        {
+            lower.push_back(kUiParameterMin);
+            upper.push_back(kUiParameterMax);
+        }
+
+        const size_t curveGenomeCount = noteCurveParams.size() * 2 + velocityCurveParams.size();
+        lower.insert(lower.end(), curveGenomeCount, kUiParameterMin);
+        upper.insert(upper.end(), curveGenomeCount, kUiParameterMax);
+        return { lower, upper };
     }
 
     std::array<float, NumParams> parametersFor(const std::vector<float>& genome, int midiNote, float targetVelocity) const
     {
         std::array<float, NumParams> values {};
-        values.fill(0.5f);
-        values[pVolume] = 0.7f;
-        values[pDwgs4] = 1.0f;
-        values[pDownsample] = 0.0f;
-        values[pLongModes] = 0.0f;
+        for (int i = 0; i < NumParams; ++i)
+            values[static_cast<size_t>(i)] = defaultParameterValue(i);
 
         size_t offset = 0;
         for (int param : baseParams)
@@ -714,10 +762,10 @@ struct FitModel
         }
 
         for (float& value : values)
-            value = std::clamp(value, kFitParameterMin, kFitParameterMax);
-        values[pDwgs4] = 1.0f;
-        values[pDownsample] = 0.0f;
-        values[pLongModes] = 0.0f;
+            value = std::clamp(value, kUiParameterMin, kUiParameterMax);
+        values[pDwgs4] = defaultParameterValue(pDwgs4);
+        values[pDownsample] = defaultParameterValue(pDownsample);
+        values[pLongModes] = defaultParameterValue(pLongModes);
         return values;
     }
 };
@@ -1300,8 +1348,10 @@ public:
             << ",\"pso_verbosity\":" << options.psoVerbosity
             << ",\"pso_memory\":" << (options.psoMemory ? "true" : "false")
             << ",\"parallel_evaluations\":" << (options.parallelEvaluations ? "true" : "false")
-            << ",\"fit_parameter_min\":" << kFitParameterMin
-            << ",\"fit_parameter_max\":" << kFitParameterMax
+            << ",\"fit_parameter_min\":" << kUiParameterMin
+            << ",\"fit_parameter_max\":" << kUiParameterMax
+            << ",\"ui_parameter_min\":" << kUiParameterMin
+            << ",\"ui_parameter_max\":" << kUiParameterMax
             << ",\"max_evaluations\":" << options.maxEvaluations
             << ",\"max_seconds\":" << options.maxSeconds
             << ",\"seed\":" << options.seed
@@ -1565,10 +1615,13 @@ struct PianoFitPagmoProblem
 
     std::pair<pagmo::vector_double, pagmo::vector_double> get_bounds() const
     {
-        return {
-            pagmo::vector_double(static_cast<size_t>(genomeDimensions), static_cast<double>(kFitParameterMin)),
-            pagmo::vector_double(static_cast<size_t>(genomeDimensions), static_cast<double>(kFitParameterMax)),
-        };
+        if (model == nullptr)
+            throw std::runtime_error("PianoFit pagmo problem is missing model bounds");
+        auto bounds = model->genomeBounds();
+        if (bounds.first.size() != static_cast<size_t>(genomeDimensions)
+            || bounds.second.size() != static_cast<size_t>(genomeDimensions))
+            throw std::runtime_error("PianoFit pagmo problem bounds do not match genome size");
+        return bounds;
     }
 
     std::string get_name() const
@@ -1740,8 +1793,10 @@ void writeResultJson(const std::string& path,
     out << "  \"pso_verbosity\": " << options.psoVerbosity << ",\n";
     out << "  \"pso_memory\": " << (options.psoMemory ? "true" : "false") << ",\n";
     out << "  \"parallel_evaluations\": " << (options.parallelEvaluations ? "true" : "false") << ",\n";
-    out << "  \"fit_parameter_min\": " << kFitParameterMin << ",\n";
-    out << "  \"fit_parameter_max\": " << kFitParameterMax << ",\n";
+    out << "  \"fit_parameter_min\": " << kUiParameterMin << ",\n";
+    out << "  \"fit_parameter_max\": " << kUiParameterMax << ",\n";
+    out << "  \"ui_parameter_min\": " << kUiParameterMin << ",\n";
+    out << "  \"ui_parameter_max\": " << kUiParameterMax << ",\n";
     out << "  \"max_evaluations\": " << options.maxEvaluations << ",\n";
     out << "  \"genome\": [";
     for (size_t i = 0; i < genome.size(); ++i)

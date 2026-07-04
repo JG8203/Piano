@@ -69,9 +69,10 @@ poetry run piano-fit prepare \
 ## Build The Fitter
 
 `PianoFit` uses pagmo2 for its built-in C++ generational PSO optimizer with
-threaded batch fitness evaluation. The C++ optimizer searches the stable
-interior of the plugin parameter range, `[0.2, 0.8]`, and penalizes unstable
-candidates. Install the development package before configuring CMake:
+threaded batch fitness evaluation. The C++ optimizer searches the plugin UI
+parameter range, `[0.0, 1.0]`, and seeds the baseline genome from the plugin's
+actual defaults. Unstable candidates are penalized. Install the development
+package before configuring CMake:
 
 ```bash
 # macOS
