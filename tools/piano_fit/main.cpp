@@ -44,6 +44,12 @@ constexpr float kEpsilon = 1.0e-7f;
 constexpr float kInvalidGenomeLoss = 1.0e9f;
 constexpr float kFitParameterMin = 0.2f;
 constexpr float kFitParameterMax = 0.8f;
+constexpr int kPianoLayerMidiVelocity = 26;
+constexpr int kMezzoLayerMidiVelocity = 76;
+constexpr int kForteLayerMidiVelocity = 101;
+constexpr float kPianoLayerVelocity = static_cast<float>(kPianoLayerMidiVelocity) / 127.0f;
+constexpr float kMezzoLayerVelocity = static_cast<float>(kMezzoLayerMidiVelocity) / 127.0f;
+constexpr float kForteLayerVelocity = static_cast<float>(kForteLayerMidiVelocity) / 127.0f;
 
 struct Options
 {
@@ -695,7 +701,12 @@ struct FitModel
             values[static_cast<size_t>(param)] += linear * noteX + quadratic * (noteX * noteX - 0.25f);
         }
 
-        const float velocityX = std::clamp((targetVelocity - 0.65f) / 0.35f, -1.0f, 1.0f);
+        const float velocityX = [&]() {
+            const float clampedVelocity = std::clamp(targetVelocity, kPianoLayerVelocity, kForteLayerVelocity);
+            if (clampedVelocity <= kMezzoLayerVelocity)
+                return (clampedVelocity - kMezzoLayerVelocity) / (kMezzoLayerVelocity - kPianoLayerVelocity);
+            return (clampedVelocity - kMezzoLayerVelocity) / (kForteLayerVelocity - kMezzoLayerVelocity);
+        }();
         for (int param : velocityCurveParams)
         {
             const float slope = (genome[offset++] - 0.5f) * 0.25f;
@@ -713,7 +724,7 @@ struct FitModel
 
 int midiVelocityForLayer(float targetVelocity)
 {
-    return std::clamp(static_cast<int>(std::lround(std::sqrt(std::clamp(targetVelocity, 0.0f, 1.0f)) * 127.0f)), 1, 127);
+    return std::clamp(static_cast<int>(std::lround(std::clamp(targetVelocity, 0.0f, 1.0f) * 127.0f)), 1, 127);
 }
 
 float midiFrequency(int midiNote)

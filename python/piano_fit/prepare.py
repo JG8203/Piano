@@ -47,10 +47,21 @@ NOTE_TO_SEMITONE = {
     "B": 11,
 }
 
+LAYER_TO_MIDI_VELOCITY_RANGE = {
+    "P": (1, 50),
+    "M": (51, 100),
+    "F": (101, 127),
+}
+
+LAYER_TO_MIDI_VELOCITY = {
+    "P": 26,
+    "M": 76,
+    "F": 101,
+}
+
 LAYER_TO_VELOCITY = {
-    "P": 0.35,
-    "M": 0.65,
-    "F": 1.0,
+    layer: midi_velocity / 127.0
+    for layer, midi_velocity in LAYER_TO_MIDI_VELOCITY.items()
 }
 
 SAMPLE_RE = re.compile(r"^([A-G](?:#)?)(-?\d)_([FMP])\.ncw$")

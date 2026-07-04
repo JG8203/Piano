@@ -42,7 +42,11 @@ poetry run piano-fit prepare \
 ```
 
 The script converts Kontakt `.ncw` files to WAV, writes a manifest, and records note, velocity layer, audio
-metadata, peak, and RMS statistics. It builds `ncw-convert` from the pinned
+metadata, peak, and RMS statistics. Vintage Upright layer velocities are mapped
+from the Kontakt NKI zone ranges: `P=1-50`, `M=51-100`, and `F=101-127`.
+The committed manifest uses conservative representative MIDI trigger velocities
+`P=26`, `M=76`, and `F=101`, stored as normalized `target_velocity` values.
+It builds `ncw-convert` from the pinned
 `third_party/ncw` submodule, sourced from the `JG8203/ncw` fork with the Vintage
 Upright decoder fixes committed there. Conversion progress is shown with `tqdm`;
 pass `--no-progress` for quiet logs. Use `--jobs 1` for serial conversion if you

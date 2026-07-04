@@ -21,7 +21,7 @@ class VintageUprightPrepTests(unittest.TestCase):
         midi_note, layer, velocity = prep.parse_sample_name(Path("A3_F.ncw"))
         self.assertEqual(midi_note, 57)
         self.assertEqual(layer, "F")
-        self.assertEqual(velocity, 1.0)
+        self.assertEqual(velocity, 101 / 127)
 
     def test_manifest_is_jsonl_sorted_by_note_then_layer(self):
         with tempfile.TemporaryDirectory() as tmp:
