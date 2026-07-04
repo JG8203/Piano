@@ -14,6 +14,7 @@ import math
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=12345, help="Random seed")
     parser.add_argument("--device", default="cpu", help="EvoTorch torch device")
     parser.add_argument("--work-dir", type=Path, default=None, help="Directory for temporary genome batches")
+    parser.add_argument(
+        "--evaluator-mode",
+        default="stdio",
+        choices=("stdio", "files"),
+        help="Use one long-lived stdio evaluator or per-batch JSONL files",
+    )
     return parser.parse_args(argv)
 
 
@@ -45,8 +52,12 @@ def run_json(command: list[str]) -> dict[str, Any]:
     return json.loads(completed.stdout)
 
 
-def run_checked(command: list[str]) -> None:
-    subprocess.run(command, check=True)
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def run_checked(command: list[str], cwd: Path | None = None) -> None:
+    subprocess.run(command, check=True, cwd=cwd)
 
 
 def get_genome_size(piano_fit: Path) -> int:
@@ -83,6 +94,128 @@ def read_losses(path: Path) -> list[float]:
         record = json.loads(line)
         losses_by_id[str(record["id"])] = float(record["loss"])
     return [losses_by_id[str(index)] for index in range(len(losses_by_id))]
+
+
+def parse_evaluator_response(line: str, batch_id: str, ids: list[str]) -> list[float]:
+    try:
+        response = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid evaluator JSON response: {exc}") from exc
+
+    if response.get("type") == "error":
+        raise RuntimeError(f"PianoFit evaluator error: {response.get('message', 'unknown error')}")
+    if response.get("type") != "result":
+        raise RuntimeError(f"Unexpected evaluator response type: {response.get('type')!r}")
+    if response.get("batch_id") != batch_id:
+        raise RuntimeError(f"Evaluator batch_id mismatch: expected {batch_id}, got {response.get('batch_id')}")
+
+    losses = response.get("losses")
+    if not isinstance(losses, list):
+        raise RuntimeError("Evaluator response is missing losses")
+    losses_by_id: dict[str, float] = {}
+    for item in losses:
+        if not isinstance(item, dict):
+            raise RuntimeError("Evaluator loss item must be an object")
+        losses_by_id[str(item["id"])] = float(item["loss"])
+    try:
+        return [losses_by_id[candidate_id] for candidate_id in ids]
+    except KeyError as exc:
+        raise RuntimeError(f"Evaluator response missing loss for id {exc.args[0]}") from exc
+
+
+class StdioEvaluator:
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.args = args
+        self.batch_index = 0
+        self.stderr_lines: list[str] = []
+        self.process = subprocess.Popen(
+            [
+                str(args.piano_fit),
+                "--manifest",
+                str(args.manifest),
+                "--subset",
+                args.subset,
+                "--max-seconds",
+                str(args.max_seconds),
+                "--serve-jsonl",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            cwd=repo_root(),
+        )
+        self._stderr_thread = threading.Thread(target=self._read_stderr, daemon=True)
+        self._stderr_thread.start()
+
+    def _read_stderr(self) -> None:
+        assert self.process.stderr is not None
+        for line in self.process.stderr:
+            self.stderr_lines.append(line)
+
+    def _stderr_text(self) -> str:
+        return "".join(self.stderr_lines).strip()
+
+    def _protocol_error(self, message: str) -> RuntimeError:
+        stderr = self._stderr_text()
+        if stderr:
+            return RuntimeError(f"{message}\nPianoFit stderr:\n{stderr}")
+        return RuntimeError(message)
+
+    def evaluate(self, genomes: list[list[float]]) -> list[float]:
+        if self.process.poll() is not None:
+            raise self._protocol_error(f"PianoFit evaluator exited with code {self.process.returncode}")
+        if self.process.stdin is None or self.process.stdout is None:
+            raise RuntimeError("PianoFit evaluator pipes are unavailable")
+
+        batch_id = f"{self.batch_index:06d}"
+        self.batch_index += 1
+        ids = [str(index) for index in range(len(genomes))]
+        request = {
+            "type": "evaluate",
+            "batch_id": batch_id,
+            "genomes": [{"id": candidate_id, "genome": genome} for candidate_id, genome in zip(ids, genomes)],
+        }
+        try:
+            self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+            self.process.stdin.flush()
+            line = self.process.stdout.readline()
+        except BrokenPipeError as exc:
+            raise self._protocol_error("PianoFit evaluator pipe closed") from exc
+
+        if not line:
+            raise self._protocol_error(f"PianoFit evaluator exited before responding to batch {batch_id}")
+        try:
+            return parse_evaluator_response(line, batch_id, ids)
+        except RuntimeError as exc:
+            raise self._protocol_error(str(exc)) from exc
+
+    def close(self) -> None:
+        if self.process.poll() is None and self.process.stdin is not None:
+            try:
+                self.process.stdin.write(json.dumps({"type": "shutdown"}, separators=(",", ":")) + "\n")
+                self.process.stdin.flush()
+            except (BrokenPipeError, OSError):
+                pass
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=2)
+        for pipe in (self.process.stdin, self.process.stdout, self.process.stderr):
+            if pipe is not None and not pipe.closed:
+                pipe.close()
+
+    def __enter__(self) -> "StdioEvaluator":
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        self.close()
 
 
 class JsonlMetrics:
@@ -133,6 +266,10 @@ def run_training(args: argparse.Namespace, metrics: Any | None = None) -> int:
     if args.max_evals < 1:
         raise SystemExit("--max-evals must be at least 1")
 
+    evaluator_mode = getattr(args, "evaluator_mode", "stdio")
+    if evaluator_mode not in ("stdio", "files"):
+        raise SystemExit("--evaluator-mode must be one of: stdio, files")
+
     genome_size = get_genome_size(args.piano_fit)
     work_dir = args.work_dir or Path(tempfile.mkdtemp(prefix="piano-fit-evotorch-"))
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -154,33 +291,41 @@ def run_training(args: argparse.Namespace, metrics: Any | None = None) -> int:
             "subset": args.subset,
             "max_seconds": args.max_seconds,
             "seed": args.seed,
+            "evaluator_mode": evaluator_mode,
         }
     )
+
+    stdio_evaluator: StdioEvaluator | None = None
 
     def objective(values: Any) -> Any:
         nonlocal best_loss, best_genome, evaluations, batch_index
         genomes = tensor_to_rows(values)
 
-        input_path = work_dir / f"population-{batch_index:06d}.jsonl"
-        output_path = work_dir / f"losses-{batch_index:06d}.jsonl"
-        batch_index += 1
-        write_genomes(input_path, genomes)
+        if evaluator_mode == "stdio":
+            if stdio_evaluator is None:
+                raise RuntimeError("Stdio evaluator was not initialized")
+            losses = stdio_evaluator.evaluate(genomes)
+        else:
+            input_path = work_dir / f"population-{batch_index:06d}.jsonl"
+            output_path = work_dir / f"losses-{batch_index:06d}.jsonl"
+            batch_index += 1
+            write_genomes(input_path, genomes)
 
-        command = [
-            str(args.piano_fit),
-            "--manifest",
-            str(args.manifest),
-            "--subset",
-            args.subset,
-            "--max-seconds",
-            str(args.max_seconds),
-            "--eval-genomes",
-            str(input_path),
-            "--eval-output",
-            str(output_path),
-        ]
-        run_checked(command)
-        losses = read_losses(output_path)
+            command = [
+                str(args.piano_fit),
+                "--manifest",
+                str(args.manifest),
+                "--subset",
+                args.subset,
+                "--max-seconds",
+                str(args.max_seconds),
+                "--eval-genomes",
+                str(input_path),
+                "--eval-output",
+                str(output_path),
+            ]
+            run_checked(command, cwd=repo_root())
+            losses = read_losses(output_path)
 
         for genome, loss in zip(genomes, losses):
             evaluations += 1
@@ -212,19 +357,26 @@ def run_training(args: argparse.Namespace, metrics: Any | None = None) -> int:
     )
     searcher = make_cmaes(problem, args.population, args.sigma, genome_size)
 
-    generations = math.ceil(args.max_evals / args.population)
-    for generation in tqdm(range(generations), desc="EvoTorch CMA-ES", unit="gen"):
-        searcher.step()
-        metrics.log(
-            {
-                "type": "generation",
-                "generation": generation + 1,
-                "evaluation": evaluations,
-                "best_loss": best_loss,
-            }
-        )
-        if evaluations >= args.max_evals:
-            break
+    try:
+        if evaluator_mode == "stdio":
+            stdio_evaluator = StdioEvaluator(args)
+
+        generations = math.ceil(args.max_evals / args.population)
+        for generation in tqdm(range(generations), desc="EvoTorch CMA-ES", unit="gen"):
+            searcher.step()
+            metrics.log(
+                {
+                    "type": "generation",
+                    "generation": generation + 1,
+                    "evaluation": evaluations,
+                    "best_loss": best_loss,
+                }
+            )
+            if evaluations >= args.max_evals:
+                break
+    finally:
+        if stdio_evaluator is not None:
+            stdio_evaluator.close()
 
     best_path = work_dir / "best-genome.jsonl"
     write_genomes(best_path, [best_genome])
@@ -243,7 +395,7 @@ def run_training(args: argparse.Namespace, metrics: Any | None = None) -> int:
     ]
     if args.export_dir:
         final_command.extend(["--export-dir", str(args.export_dir)])
-    run_checked(final_command)
+    run_checked(final_command, cwd=repo_root())
     metrics.log({"type": "final", "best_loss": best_loss, "evaluations": evaluations})
     print(f"Best loss: {best_loss}")
     print(f"Result: {args.output}")

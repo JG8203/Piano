@@ -44,6 +44,26 @@ class TrainCommandTests(unittest.TestCase):
         self.assertEqual("offline", enabled["wandb"]["mode"])
         self.assertFalse(disabled["wandb"]["enabled"])
 
+    def test_dry_run_includes_default_evaluator_mode(self):
+        data = self.dry_run()
+
+        self.assertEqual("stdio", data["train"]["evaluator_mode"])
+
+    def test_evaluator_mode_override_changes_effective_config(self):
+        data = self.dry_run("--evaluator-mode", "files")
+
+        self.assertEqual("files", data["train"]["evaluator_mode"])
+
+    def test_training_args_include_file_evaluator_mode(self):
+        config = train.apply_overrides(train.load_config("configs/local-smoke.yaml"), train.parse_args([
+            "--config",
+            "configs/local-smoke.yaml",
+            "--evaluator-mode",
+            "files",
+        ]))
+
+        self.assertEqual("files", train.training_args(config).evaluator_mode)
+
     def test_dry_run_does_not_launch_training_or_import_wandb(self):
         with mock.patch("piano_fit.train_evotorch.run_checked") as run_checked, mock.patch(
             "piano_fit.train_evotorch.get_genome_size"

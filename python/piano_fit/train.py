@@ -29,6 +29,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--max-seconds", type=float, default=None, help="Override target/render crop duration")
     parser.add_argument("--seed", type=int, default=None, help="Override random seed")
     parser.add_argument("--device", default=None, help="Override EvoTorch torch device")
+    parser.add_argument("--evaluator-mode", default=None, choices=("stdio", "files"), help="Override evaluator mode")
     parser.add_argument("--work-dir", type=Path, default=None, help="Override temporary genome batch directory")
     parser.add_argument("--metrics", type=Path, default=None, help="Override metrics JSONL path")
     parser.add_argument("--output", type=Path, default=None, help="Override final result JSON path")
@@ -64,6 +65,7 @@ def apply_overrides(config: FitConfig, args: argparse.Namespace) -> FitConfig:
         max_seconds=args.max_seconds if args.max_seconds is not None else config.train.max_seconds,
         seed=args.seed if args.seed is not None else config.train.seed,
         device=args.device if args.device is not None else config.train.device,
+        evaluator_mode=args.evaluator_mode if args.evaluator_mode is not None else config.train.evaluator_mode,
         work_dir=_override_path(args.work_dir) if args.work_dir is not None else config.train.work_dir,
     )
     outputs = replace(
@@ -118,6 +120,7 @@ def training_args(config: FitConfig) -> argparse.Namespace:
         max_seconds=config.train.max_seconds,
         seed=config.train.seed,
         device=config.train.device,
+        evaluator_mode=config.train.evaluator_mode,
         work_dir=config.train.work_dir,
     )
 

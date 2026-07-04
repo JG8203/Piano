@@ -272,3 +272,9 @@ if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# Offline fitting tools
+option(BUILD_FIT_TOOLS "Build offline Piano fitting tools" OFF)
+if(BUILD_FIT_TOOLS)
+    add_subdirectory(tools/piano_fit)
+endif()

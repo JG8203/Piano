@@ -12,6 +12,7 @@ train:
   max_seconds: 6
   seed: 12345
   device: cpu
+  evaluator_mode: stdio
   work_dir: ../../build/vintage-upright/gcp-cpu-work
 
 outputs:

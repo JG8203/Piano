@@ -86,6 +86,15 @@ cd python
 poetry run piano-fit train --config configs/local-smoke.yaml --max-evals 64 --device cpu
 ```
 
+Config-driven training uses `evaluator_mode: stdio` by default so the C++
+`PianoFit --serve-jsonl` evaluator stays alive across EvoTorch batches. To
+debug with the legacy per-batch JSONL files instead:
+
+```bash
+cd python
+poetry run piano-fit train --config configs/local-smoke.yaml --evaluator-mode files
+```
+
 Log in to W&B, then enable it for the profile:
 
 ```bash

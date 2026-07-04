@@ -13,6 +13,7 @@ train:
   seed: 12345
   # EvoTorch tensors use CUDA; PianoFit render/loss remains CPU until the evaluator changes.
   device: cuda
+  evaluator_mode: stdio
   work_dir: ../../build/vintage-upright/gcp-gpu-work
 
 outputs:

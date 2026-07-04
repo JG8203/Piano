@@ -35,6 +35,7 @@ class TrainConfig:
     max_seconds: float
     seed: int
     device: str
+    evaluator_mode: str
     work_dir: Path | None
 
 
@@ -119,6 +120,9 @@ def load_config(path: str | Path) -> FitConfig:
     train = _section(loaded, "train")
     outputs = _section(loaded, "outputs")
     wandb = _section(loaded, "wandb")
+    evaluator_mode = str(train.get("evaluator_mode", "stdio"))
+    if evaluator_mode not in ("stdio", "files"):
+        raise ValueError("train.evaluator_mode must be one of: stdio, files")
 
     return FitConfig(
         dataset=DatasetConfig(
@@ -135,6 +139,7 @@ def load_config(path: str | Path) -> FitConfig:
             max_seconds=float(_required(train, "train", "max_seconds")),
             seed=int(_required(train, "train", "seed")),
             device=str(_required(train, "train", "device")),
+            evaluator_mode=evaluator_mode,
             work_dir=_optional_path(train.get("work_dir"), base_dir),
         ),
         outputs=OutputConfig(
