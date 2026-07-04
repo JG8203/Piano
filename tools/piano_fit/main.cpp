@@ -100,7 +100,7 @@ struct Options
     bool printModelInfo = false;
     bool serveJsonl = false;
     bool psoMemory = false;
-    bool parallelEvaluations = true;
+    bool parallelEvaluations = false;
 };
 
 struct ManifestRecord
@@ -229,7 +229,8 @@ void printUsage(std::ostream& out = std::cout)
         << "  --neighb-param <n>     pagmo PSO neighbourhood parameter (default 4)\n"
         << "  --pso-verbosity <n>    pagmo log/screen interval in generations (default 1, 0 disables)\n"
         << "  --pso-memory           Keep pagmo PSO memory across evolve calls\n"
-        << "  --serial-evals         Disable pagmo thread_bfe parallel batch fitness evaluation\n"
+        << "  --parallel-evals       Enable pagmo thread_bfe parallel batch fitness evaluation (experimental)\n"
+        << "  --serial-evals         Use serial fitness evaluation (default)\n"
         << "  --sigma <x>            Deprecated; use --max-vel for PSO velocity bounds\n"
         << "  --max-seconds <x>      Target/render crop duration (default 6)\n"
         << "  --export-dir <dir>     Optional target/render WAV export directory\n"
@@ -297,6 +298,8 @@ Options parseOptions(int argc, char** argv)
             options.serveJsonl = true;
         else if (arg == "--pso-memory")
             options.psoMemory = true;
+        else if (arg == "--parallel-evals")
+            options.parallelEvaluations = true;
         else if (arg == "--serial-evals")
             options.parallelEvaluations = false;
         else if (arg == "--help" || arg == "-h")
@@ -871,25 +874,87 @@ bool isGenomeStableForTarget(const FitModel& model, const std::vector<float>& ge
     for (int stringIndex = 0; stringIndex < nstrings; ++stringIndex)
     {
         const float fk = f * (1.0f + (tune[nstrings - 1][stringIndex] - 1.0f) * v[static_cast<size_t>(pStringDetuning)]);
+        if (! std::isfinite(fk) || fk <= 0.0f)
+            return false;
+
         dwgs string;
         const int upsample = string.getMinUpsample(downsample, static_cast<float>(kSampleRate), fk, hammerPosition, bending);
+        if (upsample < 1)
+            return false;
+
         const float deltot = static_cast<float>(kSampleRate) / static_cast<float>(downsample) / fk * static_cast<float>(upsample);
+        if (! std::isfinite(deltot) || deltot <= 0.0f)
+            return false;
+
+        int dispersionStages = 0;
+        if (bending < 0.00005f)
+            dispersionStages = 0;
+        else if (bending < 0.0001f)
+            dispersionStages = 1;
+        else if (bending < 0.0002f)
+            dispersionStages = 2;
+        else if (bending < 0.0004f)
+            dispersionStages = 3;
+        else
+            dispersionStages = 4;
+
+        float dDispersion = 0.0f;
+        if (dispersionStages > 0)
+        {
+            ThiranDispersion dispersion;
+            dispersion.create(bending, fk, dispersionStages, downsample, upsample);
+            dDispersion = static_cast<float>(dispersionStages) * dispersion.phasedelay(static_cast<float>(kPi * 2.0) / deltot);
+            if (! std::isfinite(dDispersion))
+                return false;
+        }
+
         const int del0 = static_cast<int>(0.5f * (hammerPosition * deltot));
+        int del1 = static_cast<int>((hammerPosition * deltot) - 1.0f);
+        if (del1 < 2)
+            return false;
+        float dHammer = hammerPosition * deltot - static_cast<float>(del1);
+        int dd = std::min(4, del1 - 2);
+        dHammer += static_cast<float>(dd);
+        del1 -= dd;
+        if (! std::isfinite(dHammer) || static_cast<int>(dHammer) < 0)
+            return false;
+
         int del2 = static_cast<int>(0.5f * (deltot - hammerPosition * deltot) - 1.0f);
+        int del3 = static_cast<int>(0.5f * (deltot - hammerPosition * deltot) - dDispersion - 2.0f);
         if (del2 < 1)
+            return false;
+        if (del3 < 1)
             return false;
 
         const float delHalf = 0.5f * deltot;
         const float delHammerHalf = 0.5f * hammerPosition * deltot;
         float dTop = delHalf - delHammerHalf - static_cast<float>(del2);
-        const int dd = std::min(4, del2 - 1);
+        dd = std::min(4, del2 - 1);
         dTop += static_cast<float>(dd);
         del2 -= dd;
         const int del4 = static_cast<int>(dTop);
+
+        float dBottomAndLoss = delHalf - delHammerHalf - static_cast<float>(del3) - dDispersion;
+        dd = std::min(4, del3 - 1);
+        dBottomAndLoss += static_cast<float>(dd);
+        del3 -= dd;
+
+        Loss lossFilter;
+        lossFilter.create(fk,
+                          v[static_cast<size_t>(pStringDecay)],
+                          v[static_cast<size_t>(pStringLopass)],
+                          static_cast<float>(upsample) / static_cast<float>(downsample));
+        const float lowpassDelay = lossFilter.phasedelay(static_cast<float>(kPi * 2.0) / deltot);
+        const float dBottom = dBottomAndLoss - lowpassDelay;
+
         const int delTab = del0 + del2 + del4;
-        if (del0 < 0 || del2 < 0 || del4 < 0 || delTab < 0)
+        if (! std::isfinite(dTop) || ! std::isfinite(dBottomAndLoss) || ! std::isfinite(dBottom))
             return false;
-        if (del0 >= DelaySize || del2 >= DelaySize || del4 >= DelaySize || delTab >= DelaySize)
+        if (del0 < 0 || del1 < 0 || del2 < 0 || del3 < 0 || del4 < 0 || delTab < 0)
+            return false;
+        if (del0 >= DelaySize || del1 >= DelaySize || del2 >= DelaySize || del3 >= DelaySize || del4 >= DelaySize || delTab >= DelaySize)
+            return false;
+        if (static_cast<int>(dBottom) < 0)
             return false;
     }
 

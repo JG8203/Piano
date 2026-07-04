@@ -216,8 +216,7 @@ The config-driven command always writes a local JSONL metrics file when the
 profile specifies one, so you still have local run telemetry if W&B is disabled
 or offline.
 
-The native C++ `PianoFit` optimizer uses pagmo's generational PSO with threaded
-batch fitness evaluation by default. The search is constrained to the plugin UI
+The native C++ `PianoFit` optimizer uses pagmo's generational PSO. The search is constrained to the plugin UI
 parameter range, `[0.0, 1.0]`, and the baseline genome is seeded from the
 plugin's actual defaults. Unstable candidates are penalized instead of
 terminating the run. It also writes JSONL metrics and can be streamed through
@@ -237,7 +236,9 @@ poetry run piano-fit wandb --cwd .. --wandb-mode offline -- \
   --output build/vintage-upright/cpp-pso-fit.json
 ```
 
-Use `--serial-evals` to disable pagmo `thread_bfe` parallelism when debugging.
+Fitness evaluation is serial by default because the current plugin render core
+is not fully thread-safe under pagmo `thread_bfe`. Use `--parallel-evals` only
+for experimental local runs.
 
 ## Docker And GCP
 

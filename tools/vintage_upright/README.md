@@ -68,8 +68,7 @@ poetry run piano-fit prepare \
 
 ## Build The Fitter
 
-`PianoFit` uses pagmo2 for its built-in C++ generational PSO optimizer with
-threaded batch fitness evaluation. The C++ optimizer searches the plugin UI
+`PianoFit` uses pagmo2 for its built-in C++ generational PSO optimizer. The C++ optimizer searches the plugin UI
 parameter range, `[0.0, 1.0]`, and seeds the baseline genome from the plugin's
 actual defaults. Unstable candidates are penalized. Install the development
 package before configuring CMake:
@@ -152,7 +151,7 @@ work in the long-lived `PianoFit` evaluator.
 ## Compatibility And Reference
 
 The built-in C++ pagmo PSO path is available by running `PianoFit` directly
-with `--max-evals`. Parallel batch evaluation is enabled by default:
+with `--max-evals`. Fitness evaluation is serial by default:
 
 ```bash
 ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
@@ -167,8 +166,10 @@ with `--max-evals`. Parallel batch evaluation is enabled by default:
   --export-dir build/vintage-upright/smoke-audio
 ```
 
-Use `--serial-evals` to disable pagmo `thread_bfe` while debugging, and increase
-`--pso-verbosity` only when you want more frequent pagmo generation logs.
+Fitness evaluation is serial by default because the current plugin render core
+is not fully thread-safe under pagmo `thread_bfe`. Use `--parallel-evals` only
+for experimental local runs, and increase `--pso-verbosity` only when you want
+more frequent pagmo generation logs.
 
 Stream the same C++ metrics to W&B without native C++ W&B integration:
 
