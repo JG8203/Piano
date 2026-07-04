@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783131874123,
+  "lastUpdate": 1783131905148,
   "repoUrl": "https://github.com/JG8203/Piano",
   "entries": {
     "Piano Performance (Windows)": [
@@ -4227,6 +4227,50 @@ window.BENCHMARK_DATA = {
           {
             "name": "16 voices",
             "value": 22.2266,
+            "unit": "x realtime"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "joshua_gilo@dlsu.edu.ph",
+            "name": "Joshua Armaine Gilo",
+            "username": "JG8203"
+          },
+          "committer": {
+            "email": "joshua_gilo@dlsu.edu.ph",
+            "name": "Joshua Armaine Gilo",
+            "username": "JG8203"
+          },
+          "distinct": true,
+          "id": "46d25217073d03745c5dfef617967e5b47ec05f7",
+          "message": "Document pkg-config Linux dependency",
+          "timestamp": "2026-07-04T10:20:59+08:00",
+          "tree_id": "7f8c69b14a32d8418c99c8842a3287cfc22c286c",
+          "url": "https://github.com/JG8203/Piano/commit/46d25217073d03745c5dfef617967e5b47ec05f7"
+        },
+        "date": 1783131904372,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "1 voice",
+            "value": 116.4558,
+            "unit": "x realtime"
+          },
+          {
+            "name": "4 voices",
+            "value": 49.6927,
+            "unit": "x realtime"
+          },
+          {
+            "name": "8 voices",
+            "value": 34.1396,
+            "unit": "x realtime"
+          },
+          {
+            "name": "16 voices",
+            "value": 21.8271,
             "unit": "x realtime"
           }
         ]
