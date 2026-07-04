@@ -1,9 +1,16 @@
 cmake_minimum_required(VERSION 3.24.0)
 
+find_package(pagmo CONFIG REQUIRED)
+
 juce_add_console_app(PianoFit
     PRODUCT_NAME "Piano Fit"
     VERSION 1.0.0
 )
+
+if(APPLE)
+    set(PIANOFIT_OSX_ARCHITECTURES "${CMAKE_HOST_SYSTEM_PROCESSOR}" CACHE STRING "macOS architectures for the PianoFit console tool")
+    set_target_properties(PianoFit PROPERTIES OSX_ARCHITECTURES "${PIANOFIT_OSX_ARCHITECTURES}")
+endif()
 
 target_sources(PianoFit PRIVATE
     main.cpp
@@ -24,6 +31,8 @@ target_include_directories(PianoFit PRIVATE
 )
 
 target_link_libraries(PianoFit PRIVATE
+    Pagmo::pagmo
+
     gin
     gin_dsp
     gin_simd

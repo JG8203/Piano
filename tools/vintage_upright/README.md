@@ -64,6 +64,17 @@ poetry run piano-fit prepare \
 
 ## Build The Fitter
 
+`PianoFit` uses pagmo2 for its built-in C++ PSO optimizer. Install the
+development package before configuring CMake:
+
+```bash
+# macOS
+brew install pagmo
+
+# Ubuntu 24.04
+sudo apt-get install -y libpagmo-dev
+```
+
 ```bash
 cmake -B build-fit -DCMAKE_BUILD_TYPE=Release -DBUILD_FIT_TOOLS=ON
 cmake --build build-fit --target PianoFit --config Release -j 2
@@ -133,18 +144,35 @@ work in the long-lived `PianoFit` evaluator.
 
 ## Compatibility And Reference
 
-The original built-in C++ CMA-ES path is still available by running `PianoFit`
-directly with `--max-evals`, which is useful as a smaller dependency fallback:
+The built-in C++ pagmo PSO path is available by running `PianoFit` directly
+with `--max-evals`:
 
 ```bash
 ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
   --manifest data/vintage-upright/manifest.jsonl \
   --subset pilot \
-  --max-evals 0 \
+  --population 8 \
+  --max-evals 16 \
   --max-seconds 1 \
   --metrics build/vintage-upright/smoke-metrics.jsonl \
   --output build/vintage-upright/smoke.json \
   --export-dir build/vintage-upright/smoke-audio
+```
+
+Stream the same C++ metrics to W&B without native C++ W&B integration:
+
+```bash
+cd python
+poetry run piano-fit wandb --cwd .. --wandb-mode offline -- \
+  ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
+  --manifest data/vintage-upright/manifest.jsonl \
+  --subset pilot \
+  --population 8 \
+  --max-evals 16 \
+  --max-seconds 1 \
+  --metrics build/vintage-upright/cpp-pso-metrics.jsonl \
+  --output build/vintage-upright/cpp-pso-fit.json \
+  --export-dir build/vintage-upright/cpp-pso-audio
 ```
 
 The flag-based EvoTorch command remains available for saved commands:

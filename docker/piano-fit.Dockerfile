@@ -24,6 +24,7 @@ RUN apt-get update \
         libglu1-mesa-dev \
         libgtk-3-dev \
         libjack-jackd2-dev \
+        libpagmo-dev \
         libwebkit2gtk-4.1-dev \
         libx11-dev \
         libxcomposite-dev \

@@ -29,6 +29,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--wandb-run-name", default=None, help="Optional W&B run name")
     parser.add_argument("--wandb-mode", default=None, help="Optional W&B mode, e.g. offline")
     parser.add_argument("--metrics", type=Path, default=None, help="Metrics JSONL path")
+    parser.add_argument("--cwd", type=Path, default=None, help="Working directory for the PianoFit command")
     parser.add_argument("fit_command", nargs=argparse.REMAINDER, help="PianoFit command after --")
     args = parser.parse_args(argv)
 
@@ -50,6 +51,15 @@ def ensure_metrics_arg(command: list[str], metrics_path: Path) -> list[str]:
     if "--metrics" in command:
         return command
     return command + ["--metrics", str(metrics_path)]
+
+
+def command_path(value: str | None, cwd: Path | None) -> Path | None:
+    if value is None:
+        return None
+    path = Path(value)
+    if not path.is_absolute() and cwd is not None:
+        path = cwd / path
+    return path
 
 
 def read_new_metrics(path: Path, offset: int) -> tuple[int, list[dict[str, object]]]:
@@ -102,10 +112,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    metrics_path = args.metrics or Path(tempfile.mkdtemp(prefix="piano-fit-wandb-")) / "metrics.jsonl"
+    cwd = args.cwd.resolve() if args.cwd is not None else None
+    metrics_path = (args.metrics or Path(tempfile.mkdtemp(prefix="piano-fit-wandb-")) / "metrics.jsonl").resolve()
     command = ensure_metrics_arg(args.fit_command, metrics_path)
-    output_path = fit_arg_value(command, "--output")
-    export_dir = fit_arg_value(command, "--export-dir")
+    output_path = command_path(fit_arg_value(command, "--output"), cwd)
+    export_dir = command_path(fit_arg_value(command, "--export-dir"), cwd)
 
     init_kwargs = {
         "project": args.wandb_project,
@@ -114,9 +125,10 @@ def main(argv: list[str] | None = None) -> int:
         "mode": args.wandb_mode,
         "config": {
             "fit_command": command,
+            "fit_cwd": str(cwd) if cwd else None,
             "metrics_path": str(metrics_path),
-            "output_path": output_path,
-            "export_dir": export_dir,
+            "output_path": str(output_path) if output_path else None,
+            "export_dir": str(export_dir) if export_dir else None,
         },
     }
     init_kwargs = {k: v for k, v in init_kwargs.items() if v is not None}
@@ -128,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            cwd=cwd,
         )
 
         offset = 0
@@ -148,11 +161,11 @@ def main(argv: list[str] | None = None) -> int:
         for metric in metrics:
             log_metric(run, metric)
 
-        if output_path and Path(output_path).exists():
-            run.save(output_path)
-        if export_dir and Path(export_dir).is_dir():
+        if output_path and output_path.exists():
+            run.save(str(output_path))
+        if export_dir and export_dir.is_dir():
             artifact = wandb.Artifact("piano-fit-audio", type="audio")
-            for wav in Path(export_dir).glob("*.wav"):
+            for wav in export_dir.glob("*.wav"):
                 artifact.add_file(str(wav))
             run.log_artifact(artifact)
 

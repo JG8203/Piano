@@ -4,6 +4,9 @@ This container is a clean Linux surface for building the `PianoFit` evaluator,
 installing the Python `piano-fit` package, and running the config-driven fitting
 pipeline on local or GCP machines.
 
+The image installs Ubuntu's `libpagmo-dev` package so the native C++ `PianoFit`
+pagmo PSO optimizer is available in addition to the Python orchestration path.
+
 ## Build Locally
 
 ```bash
@@ -53,7 +56,8 @@ docker run --rm --gpus all \
 
 The GPU profile sets EvoTorch's tensor/search device to CUDA. The C++ rendering
 and C++ loss evaluator remain CPU-bound unless a future evaluator implementation
-changes that.
+changes that. Native C++ `PianoFit --metrics` runs can be streamed to W&B with
+`piano-fit wandb -- <PianoFit command>`; no C++ W&B SDK is required.
 
 ## Dataset Behavior
 

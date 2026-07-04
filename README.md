@@ -16,8 +16,8 @@ the fitting workflow uses a C++ `PianoFit` evaluator plus Python orchestration.
 - Longitudinal string modes
 - Soundboard resonance
 - Available as VST, VST3, AU (macOS), and LV2 (Linux) plugins
-- Offline fitting tools with Poetry, EvoTorch, W&B support, Docker, and GCP-ready
-  CPU/GPU profiles
+- Offline fitting tools with Poetry, EvoTorch orchestration, pagmo2 PSO fallback,
+  W&B support, Docker, and GCP-ready CPU/GPU profiles
 
 ## Repository Layout
 
@@ -81,8 +81,21 @@ sudo apt-get install -y \
 - Python 3.11 or 3.12
 - Poetry
 - Rust/Cargo for rebuilding the NCW conversion helper
+- pagmo2 development files for the C++ `PianoFit` optimizer
 - Hydrated Vintage Upright samples for full fitting runs
 - Docker if you want to use the containerized GCP workflow
+
+On macOS, install pagmo2 with Homebrew:
+
+```bash
+brew install pagmo
+```
+
+On Ubuntu 24.04, install the development package:
+
+```bash
+sudo apt-get install -y libpagmo-dev
+```
 
 ## Build The Plugin
 
@@ -202,6 +215,22 @@ Useful W&B-related environment variables:
 The config-driven command always writes a local JSONL metrics file when the
 profile specifies one, so you still have local run telemetry if W&B is disabled
 or offline.
+
+The native C++ `PianoFit` optimizer also writes JSONL metrics and can be streamed
+through the existing W&B wrapper:
+
+```bash
+cd python
+poetry run piano-fit wandb --cwd .. --wandb-mode offline -- \
+  ./build-fit/tools/piano_fit/PianoFit_artefacts/Release/PianoFit \
+  --manifest data/vintage-upright/manifest.jsonl \
+  --subset pilot \
+  --population 8 \
+  --max-evals 16 \
+  --max-seconds 1 \
+  --metrics build/vintage-upright/cpp-pso-metrics.jsonl \
+  --output build/vintage-upright/cpp-pso-fit.json
+```
 
 ## Docker And GCP
 

@@ -12,14 +12,22 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <optional>
 #include <random>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
+
+#include <pagmo/algorithm.hpp>
+#include <pagmo/algorithms/pso.hpp>
+#include <pagmo/population.hpp>
+#include <pagmo/problem.hpp>
+#include <pagmo/types.hpp>
 
 extern Param params[NumParams];
 
@@ -42,11 +50,18 @@ struct Options
     std::string exportDir;
     int maxEvaluations = 10000;
     int population = 40;
-    float sigma = 0.15f;
+    double omega = 0.7298;
+    double eta1 = 2.05;
+    double eta2 = 2.05;
+    double maxVelocity = 0.5;
+    unsigned psoVariant = 5;
+    unsigned neighbourhoodType = 2;
+    unsigned neighbourhoodParam = 4;
     float maxSeconds = 6.0f;
     uint32_t seed = 12345;
     bool printModelInfo = false;
     bool serveJsonl = false;
+    bool psoMemory = false;
 };
 
 struct ManifestRecord
@@ -159,14 +174,22 @@ void printUsage(std::ostream& out = std::cout)
         << "options:\n"
         << "  --output <file>        Result JSON path (default piano_fit_result.json)\n"
         << "  --metrics <file>       Optional JSONL metric stream for W&B/wrappers\n"
-        << "  --eval-genomes <file>  Evaluate external genome JSONL instead of running built-in CMA-ES\n"
+        << "  --eval-genomes <file>  Evaluate external genome JSONL instead of running built-in PSO\n"
         << "  --eval-output <file>   Output JSONL losses for --eval-genomes\n"
         << "  --serve-jsonl          Serve JSONL evaluator requests on stdin/stdout\n"
         << "  --fixed-genome <file>  Evaluate/export one external genome JSON/JSONL instead of optimizing\n"
         << "  --subset pilot|all     Dataset subset (default pilot)\n"
         << "  --max-evals <n>        Evaluation budget; 0 evaluates defaults only\n"
-        << "  --population <n>       CMA-ES population (default 40)\n"
-        << "  --sigma <x>            Initial sigma (default 0.15)\n"
+        << "  --population <n>       PSO swarm population (default 40)\n"
+        << "  --omega <x>            PSO inertia/constriction coefficient (default 0.7298)\n"
+        << "  --eta1 <x>             PSO cognitive coefficient (default 2.05)\n"
+        << "  --eta2 <x>             PSO social/neighbourhood coefficient (default 2.05)\n"
+        << "  --max-vel <x>          Max particle velocity as fraction of bounds (default 0.5)\n"
+        << "  --pso-variant <n>      pagmo PSO variant 1..6 (default 5)\n"
+        << "  --neighb-type <n>      pagmo PSO topology 1..4 (default 2)\n"
+        << "  --neighb-param <n>     pagmo PSO neighbourhood parameter (default 4)\n"
+        << "  --pso-memory           Keep pagmo PSO memory across evolve calls\n"
+        << "  --sigma <x>            Deprecated; use --max-vel for PSO velocity bounds\n"
         << "  --max-seconds <x>      Target/render crop duration (default 6)\n"
         << "  --export-dir <dir>     Optional target/render WAV export directory\n"
         << "  --seed <n>             RNG seed\n"
@@ -204,7 +227,21 @@ Options parseOptions(int argc, char** argv)
         else if (arg == "--population")
             options.population = std::stoi(requireValue("--population"));
         else if (arg == "--sigma")
-            options.sigma = std::stof(requireValue("--sigma"));
+            throw std::runtime_error("--sigma is deprecated for pagmo PSO; use --max-vel to control maximum particle velocity");
+        else if (arg == "--omega")
+            options.omega = std::stod(requireValue("--omega"));
+        else if (arg == "--eta1")
+            options.eta1 = std::stod(requireValue("--eta1"));
+        else if (arg == "--eta2")
+            options.eta2 = std::stod(requireValue("--eta2"));
+        else if (arg == "--max-vel")
+            options.maxVelocity = std::stod(requireValue("--max-vel"));
+        else if (arg == "--pso-variant")
+            options.psoVariant = static_cast<unsigned>(std::stoul(requireValue("--pso-variant")));
+        else if (arg == "--neighb-type")
+            options.neighbourhoodType = static_cast<unsigned>(std::stoul(requireValue("--neighb-type")));
+        else if (arg == "--neighb-param")
+            options.neighbourhoodParam = static_cast<unsigned>(std::stoul(requireValue("--neighb-param")));
         else if (arg == "--max-seconds")
             options.maxSeconds = std::stof(requireValue("--max-seconds"));
         else if (arg == "--export-dir")
@@ -215,6 +252,8 @@ Options parseOptions(int argc, char** argv)
             options.printModelInfo = true;
         else if (arg == "--serve-jsonl")
             options.serveJsonl = true;
+        else if (arg == "--pso-memory")
+            options.psoMemory = true;
         else if (arg == "--help" || arg == "-h")
         {
             printUsage();
@@ -232,6 +271,20 @@ Options parseOptions(int argc, char** argv)
         throw std::runtime_error("--eval-output is required with --eval-genomes");
     if (options.population < 4)
         throw std::runtime_error("--population must be at least 4");
+    if (options.omega < 0.0 || options.omega > 1.0)
+        throw std::runtime_error("--omega must be in the [0, 1] interval");
+    if (options.eta1 < 0.0 || options.eta1 > 4.0)
+        throw std::runtime_error("--eta1 must be in the [0, 4] interval");
+    if (options.eta2 < 0.0 || options.eta2 > 4.0)
+        throw std::runtime_error("--eta2 must be in the [0, 4] interval");
+    if (options.maxVelocity <= 0.0 || options.maxVelocity > 1.0)
+        throw std::runtime_error("--max-vel must be in the (0, 1] interval");
+    if (options.psoVariant < 1 || options.psoVariant > 6)
+        throw std::runtime_error("--pso-variant must be one of 1..6");
+    if (options.neighbourhoodType < 1 || options.neighbourhoodType > 4)
+        throw std::runtime_error("--neighb-type must be one of 1..4");
+    if (options.neighbourhoodParam == 0)
+        throw std::runtime_error("--neighb-param must be at least 1");
     return options;
 }
 
@@ -1073,11 +1126,19 @@ public:
             return;
 
         out << "{\"type\":\"config\""
+            << ",\"optimizer\":\"pagmo.pso\""
             << ",\"subset\":\"" << jsonEscape(options.subset) << "\""
             << ",\"target_count\":" << targetCount
             << ",\"genome_size\":" << genomeSize
             << ",\"population\":" << options.population
-            << ",\"sigma\":" << options.sigma
+            << ",\"omega\":" << options.omega
+            << ",\"eta1\":" << options.eta1
+            << ",\"eta2\":" << options.eta2
+            << ",\"max_velocity\":" << options.maxVelocity
+            << ",\"pso_variant\":" << options.psoVariant
+            << ",\"neighbourhood_type\":" << options.neighbourhoodType
+            << ",\"neighbourhood_param\":" << options.neighbourhoodParam
+            << ",\"pso_memory\":" << (options.psoMemory ? "true" : "false")
             << ",\"max_evaluations\":" << options.maxEvaluations
             << ",\"max_seconds\":" << options.maxSeconds
             << ",\"seed\":" << options.seed
@@ -1100,7 +1161,12 @@ public:
         out.flush();
     }
 
-    void logGeneration(int evaluations, int generation, float bestLoss, float sigma)
+    void logGeneration(int evaluations,
+                       int generation,
+                       float bestLoss,
+                       double meanVelocity,
+                       double meanLocalBest,
+                       double averageDistance)
     {
         if (! enabled)
             return;
@@ -1110,7 +1176,9 @@ public:
             << ",\"evaluation\":" << evaluations
             << ",\"generation\":" << generation
             << ",\"best_loss\":" << bestLoss
-            << ",\"sigma\":" << sigma
+            << ",\"mean_velocity\":" << meanVelocity
+            << ",\"mean_lbest\":" << meanLocalBest
+            << ",\"avg_distance\":" << averageDistance
             << "}\n";
         out.flush();
     }
@@ -1220,108 +1288,144 @@ void serveJsonlEvaluator(const FitModel& model,
     }
 }
 
-class SeparableCmaEs
+std::vector<float> toGenome(const pagmo::vector_double& values)
 {
-public:
-    SeparableCmaEs(std::vector<float> initialMean, int population, float sigma, uint32_t seed)
-        : mean(std::move(initialMean)),
-          diagonalStd(mean.size(), 1.0f),
-          populationSize(population),
-          sigmaValue(sigma),
-          rng(seed),
-          normal(0.0f, 1.0f)
-    {
-        mu = std::max(2, populationSize / 2);
-        weights.resize(static_cast<size_t>(mu));
-        for (int i = 0; i < mu; ++i)
-            weights[static_cast<size_t>(i)] = std::log((mu + 0.5) / (i + 1.0));
-        const float sum = std::accumulate(weights.begin(), weights.end(), 0.0f);
-        for (float& weight : weights)
-            weight /= sum;
-    }
+    std::vector<float> genome;
+    genome.reserve(values.size());
+    for (double value : values)
+        genome.push_back(static_cast<float>(std::clamp(value, 0.0, 1.0)));
+    return genome;
+}
 
-    template <typename Fn, typename GenerationFn>
-    Candidate run(int maxEvaluations, Candidate best, Fn&& evaluate, GenerationFn&& onGeneration)
-    {
-        int evaluations = 1;
-        int generation = 0;
+pagmo::vector_double toDecisionVector(const std::vector<float>& genome)
+{
+    pagmo::vector_double values;
+    values.reserve(genome.size());
+    for (float value : genome)
+        values.push_back(static_cast<double>(std::clamp(value, 0.0f, 1.0f)));
+    return values;
+}
 
-        while (evaluations < maxEvaluations)
-        {
-            std::vector<Candidate> candidates;
-            candidates.reserve(static_cast<size_t>(populationSize));
-
-            for (int i = 0; i < populationSize && evaluations < maxEvaluations; ++i)
-            {
-                Candidate candidate;
-                candidate.genome.resize(mean.size());
-                for (size_t d = 0; d < mean.size(); ++d)
-                {
-                    const float sample = mean[d] + sigmaValue * diagonalStd[d] * normal(rng);
-                    candidate.genome[d] = std::clamp(sample, 0.0f, 1.0f);
-                }
-                candidate.loss = evaluate(candidate.genome);
-                ++evaluations;
-                if (candidate.loss < best.loss)
-                    best = candidate;
-                candidates.push_back(std::move(candidate));
-            }
-
-            std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) { return a.loss < b.loss; });
-            updateDistribution(candidates);
-            ++generation;
-
-            if (generation % 5 == 0 || generation == 1)
-            {
-                std::cout << "evals=" << evaluations
-                          << " generation=" << generation
-                          << " best=" << best.loss
-                          << " sigma=" << sigmaValue << "\n";
-            }
-            onGeneration(evaluations, generation, best.loss, sigmaValue);
-        }
-
-        return best;
-    }
-
-private:
-    void updateDistribution(const std::vector<Candidate>& candidates)
-    {
-        std::vector<float> newMean(mean.size(), 0.0f);
-        for (int i = 0; i < mu && i < static_cast<int>(candidates.size()); ++i)
-        {
-            for (size_t d = 0; d < mean.size(); ++d)
-                newMean[d] += weights[static_cast<size_t>(i)] * candidates[static_cast<size_t>(i)].genome[d];
-        }
-
-        std::vector<float> variance(mean.size(), 1.0e-4f);
-        for (int i = 0; i < mu && i < static_cast<int>(candidates.size()); ++i)
-        {
-            for (size_t d = 0; d < mean.size(); ++d)
-            {
-                const float normalized = (candidates[static_cast<size_t>(i)].genome[d] - mean[d]) / std::max(sigmaValue, 1.0e-6f);
-                variance[d] += weights[static_cast<size_t>(i)] * normalized * normalized;
-            }
-        }
-
-        for (size_t d = 0; d < mean.size(); ++d)
-        {
-            mean[d] = std::clamp(newMean[d], 0.0f, 1.0f);
-            diagonalStd[d] = std::clamp(0.85f * diagonalStd[d] + 0.15f * std::sqrt(variance[d]), 0.05f, 3.0f);
-        }
-
-        sigmaValue = std::max(0.015f, sigmaValue * 0.995f);
-    }
-
-    std::vector<float> mean;
-    std::vector<float> diagonalStd;
-    int populationSize = 40;
-    int mu = 20;
-    float sigmaValue = 0.15f;
-    std::vector<float> weights;
-    std::mt19937 rng;
-    std::normal_distribution<float> normal;
+struct PsoEvaluationState
+{
+    MetricsLogger* metrics = nullptr;
+    int evaluations = 0;
+    float bestLoss = std::numeric_limits<float>::infinity();
 };
+
+struct PianoFitPagmoProblem
+{
+    const FitModel* model = nullptr;
+    const std::vector<TargetExample>* targets = nullptr;
+    int genomeDimensions = 0;
+    std::shared_ptr<PsoEvaluationState> state;
+
+    pagmo::vector_double fitness(const pagmo::vector_double& values) const
+    {
+        if (model == nullptr || targets == nullptr || state == nullptr)
+            throw std::runtime_error("PianoFit pagmo problem is not initialized");
+
+        const auto genome = toGenome(values);
+        const float loss = evaluateGenome(*model, genome, *targets);
+        ++state->evaluations;
+        state->bestLoss = std::min(state->bestLoss, loss);
+        if (state->metrics != nullptr)
+            state->metrics->logEvaluation(state->evaluations, loss, state->bestLoss, "pagmo-pso");
+        return { static_cast<double>(loss) };
+    }
+
+    std::pair<pagmo::vector_double, pagmo::vector_double> get_bounds() const
+    {
+        return {
+            pagmo::vector_double(static_cast<size_t>(genomeDimensions), 0.0),
+            pagmo::vector_double(static_cast<size_t>(genomeDimensions), 1.0),
+        };
+    }
+
+    std::string get_name() const
+    {
+        return "PianoFit pagmo PSO";
+    }
+};
+
+Candidate runPagmoPso(const Options& options,
+                      const FitModel& model,
+                      const std::vector<TargetExample>& targets,
+                      const std::vector<float>& initial,
+                      float initialLoss,
+                      MetricsLogger& metrics,
+                      int& evaluations,
+                      float& bestLoss)
+{
+    auto state = std::make_shared<PsoEvaluationState>();
+    state->metrics = &metrics;
+    state->evaluations = evaluations;
+    state->bestLoss = bestLoss;
+
+    PianoFitPagmoProblem udp {
+        &model,
+        &targets,
+        model.genomeSize(),
+        state,
+    };
+
+    pagmo::problem problem { udp };
+    pagmo::population population { problem, 0u, options.seed };
+    population.push_back(toDecisionVector(initial), { static_cast<double>(initialLoss) });
+    while (population.size() < static_cast<pagmo::population::size_type>(options.population))
+        population.push_back(population.random_decision_vector());
+
+    const int remainingEvaluations = std::max(0, options.maxEvaluations - state->evaluations);
+    const unsigned generations = static_cast<unsigned>(
+        std::ceil(static_cast<double>(remainingEvaluations) / static_cast<double>(options.population)));
+
+    if (generations > 0)
+    {
+        pagmo::pso pso(
+            generations,
+            options.omega,
+            options.eta1,
+            options.eta2,
+            options.maxVelocity,
+            options.psoVariant,
+            options.neighbourhoodType,
+            options.neighbourhoodParam,
+            options.psoMemory,
+            options.seed);
+        pso.set_verbosity(1u);
+
+        pagmo::algorithm algorithm { pso };
+        const int evaluationsBeforeEvolve = state->evaluations;
+        population = algorithm.evolve(population);
+
+        if (auto* evolvedPso = algorithm.extract<pagmo::pso>())
+        {
+            for (const auto& line : evolvedPso->get_log())
+            {
+                const auto generation = static_cast<int>(std::get<0>(line));
+                const auto pagmoEvaluations = static_cast<int>(std::get<1>(line));
+                const auto generationEvaluation = evaluationsBeforeEvolve + pagmoEvaluations;
+                metrics.logGeneration(
+                    generationEvaluation,
+                    generation,
+                    static_cast<float>(std::get<2>(line)),
+                    std::get<3>(line),
+                    std::get<4>(line),
+                    std::get<5>(line));
+            }
+        }
+    }
+
+    evaluations = state->evaluations;
+    bestLoss = state->bestLoss;
+
+    auto championGenome = toGenome(population.champion_x());
+    const auto championFitness = population.champion_f();
+    const float championLoss = championFitness.empty()
+        ? evaluateGenome(model, championGenome, targets)
+        : static_cast<float>(championFitness.front());
+    return { std::move(championGenome), championLoss };
+}
 
 bool writeMonoWav(const std::string& path, const std::vector<float>& samples)
 {
@@ -1379,8 +1483,17 @@ void writeResultJson(const std::string& path,
     out << "{\n";
     out << "  \"initial_loss\": " << initialLoss << ",\n";
     out << "  \"best_loss\": " << bestLoss << ",\n";
+    out << "  \"optimizer\": \"pagmo.pso\",\n";
     out << "  \"subset\": \"" << jsonEscape(options.subset) << "\",\n";
     out << "  \"population\": " << options.population << ",\n";
+    out << "  \"omega\": " << options.omega << ",\n";
+    out << "  \"eta1\": " << options.eta1 << ",\n";
+    out << "  \"eta2\": " << options.eta2 << ",\n";
+    out << "  \"max_velocity\": " << options.maxVelocity << ",\n";
+    out << "  \"pso_variant\": " << options.psoVariant << ",\n";
+    out << "  \"neighbourhood_type\": " << options.neighbourhoodType << ",\n";
+    out << "  \"neighbourhood_param\": " << options.neighbourhoodParam << ",\n";
+    out << "  \"pso_memory\": " << (options.psoMemory ? "true" : "false") << ",\n";
     out << "  \"max_evaluations\": " << options.maxEvaluations << ",\n";
     out << "  \"genome\": [";
     for (size_t i = 0; i < genome.size(); ++i)
@@ -1481,20 +1594,7 @@ int main(int argc, char** argv)
         Candidate best { initial, initialLoss };
         if (options.maxEvaluations > 1)
         {
-            SeparableCmaEs optimizer(initial, options.population, options.sigma, options.seed);
-            best = optimizer.run(
-                options.maxEvaluations,
-                best,
-                [&](const std::vector<float>& genome) {
-                    const float loss = evaluateGenome(model, genome, targets);
-                    ++evaluation;
-                    bestLoss = std::min(bestLoss, loss);
-                    metrics.logEvaluation(evaluation, loss, bestLoss, "candidate");
-                    return loss;
-                },
-                [&](int evaluations, int generation, float generationBestLoss, float sigma) {
-                    metrics.logGeneration(evaluations, generation, generationBestLoss, sigma);
-                });
+            best = runPagmoPso(options, model, targets, initial, initialLoss, metrics, evaluation, bestLoss);
         }
 
         std::cout << "Best loss: " << best.loss << "\n";
