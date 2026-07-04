@@ -70,7 +70,7 @@ On Ubuntu, the CI dependency set is:
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-  clang ninja-build ladspa-sdk freeglut3-dev g++ libasound2-dev \
+  clang ninja-build pkg-config ladspa-sdk freeglut3-dev g++ libasound2-dev \
   libcurl4-openssl-dev libfreetype6-dev libjack-jackd2-dev libx11-dev \
   libxcomposite-dev libxcursor-dev libxinerama-dev libxrandr-dev \
   mesa-common-dev libwebkit2gtk-4.1-dev xvfb
