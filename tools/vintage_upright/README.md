@@ -57,8 +57,8 @@ For a quick decoder check:
 ```bash
 cd python
 poetry run piano-fit prepare \
-  "/Users/armaine/Downloads/Vintage Upright" \
-  --output /tmp/vintage-upright-check \
+  ../Vintage\ Upright \
+  --output build/vintage-upright-check \
   --only A3_F C4_F C4_M C4_P
 ```
 

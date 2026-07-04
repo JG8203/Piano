@@ -15,9 +15,7 @@ docker run --rm piano-fit:local piano-fit train --config python/configs/local-sm
 To run a CPU smoke profile with outputs outside the container:
 
 ```bash
-docker run --rm \
-  -v "$PWD/build:/workspace/build" \
-  piano-fit:local \
+docker run --rm piano-fit:local \
   piano-fit train --config python/configs/local-smoke.yaml
 ```
 
@@ -28,7 +26,6 @@ Build or pull the image on the VM, then run the CPU profile:
 ```bash
 docker run --rm \
   -e WANDB_MODE=offline \
-  -v "$PWD/build:/workspace/build" \
   piano-fit:latest \
   piano-fit train --config python/configs/gcp-cpu.yaml
 ```
@@ -50,7 +47,6 @@ and pass GPU devices through Docker:
 ```bash
 docker run --rm --gpus all \
   -e WANDB_API_KEY \
-  -v "$PWD/build:/workspace/build" \
   piano-fit:latest \
   piano-fit train --config python/configs/gcp-gpu.yaml --wandb
 ```
@@ -70,7 +66,8 @@ Before a full training run, either:
 - run `git lfs pull` in a checkout that has access to the dataset and build the
   image from that checkout;
 - run `git lfs pull` on the VM before starting the container and mount the
-  hydrated `data/vintage-upright` tree into `/workspace/data/vintage-upright`;
+  hydrated `data/vintage-upright` tree into the same relative path used by the
+  configs;
 - mount an operator-managed dataset path, such as a GCS bucket mounted with
   Cloud Storage FUSE, and override `--manifest` to point at that mounted path.
 
