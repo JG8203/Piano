@@ -86,16 +86,31 @@ def log_metric(wandb_run, metric: dict[str, object]) -> None:
         wandb_run.config.update({k: v for k, v in metric.items() if k != "type"}, allow_val_change=True)
         return
 
-    step = metric.get("evaluation")
     payload = {k: v for k, v in metric.items() if k != "type"}
     if metric_type:
         payload["event_type"] = metric_type
-    wandb_run.log(payload, step=int(step) if isinstance(step, int) else None)
+    wandb_run.log(payload)
+
+
+def define_wandb_metrics(wandb_run) -> None:
+    wandb_run.define_metric("evaluation")
+    for name in (
+        "loss",
+        "best_loss",
+        "generation",
+        "mean_velocity",
+        "mean_lbest",
+        "avg_distance",
+        "initial_loss",
+        "improvement",
+    ):
+        wandb_run.define_metric(name, step_metric="evaluation")
 
 
 class WandbMetrics:
     def __init__(self, wandb_run) -> None:
         self.wandb_run = wandb_run
+        define_wandb_metrics(self.wandb_run)
 
     def log(self, record: dict[str, object]) -> None:
         log_metric(self.wandb_run, record)
@@ -134,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     init_kwargs = {k: v for k, v in init_kwargs.items() if v is not None}
 
     with wandb.init(**init_kwargs) as run:
+        define_wandb_metrics(run)
+
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
