@@ -110,6 +110,27 @@ The config-driven command keeps a local JSONL metrics file whether or not W&B
 is enabled. Use `--subset all` after the pilot loss is moving in the right
 direction.
 
+## Run In Docker Or On GCP
+
+Build the fitting image from the repo root:
+
+```bash
+docker build -f docker/piano-fit.Dockerfile -t piano-fit:local .
+```
+
+Run the local smoke profile or a dry-run config check:
+
+```bash
+docker run --rm piano-fit:local piano-fit --help
+docker run --rm piano-fit:local piano-fit train --config python/configs/local-smoke.yaml --dry-run
+```
+
+The GCP-ready CPU and GPU profiles are `python/configs/gcp-cpu.yaml` and
+`python/configs/gcp-gpu.yaml`. See `docker/README.md` for VM commands, W&B
+environment variables, and dataset mounting options. The GPU profile currently
+accelerates EvoTorch tensor/search work only; C++ rendering and loss remain CPU
+work in the long-lived `PianoFit` evaluator.
+
 ## Compatibility And Reference
 
 The original built-in C++ CMA-ES path is still available by running `PianoFit`
